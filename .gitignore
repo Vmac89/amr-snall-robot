@@ -31,6 +31,10 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+# Mission Control map files written by cm4/server
+cm4/server/data/*.json
+cm4/server/data/*.tmp
+
 # Editor and OS
 .DS_Store
 *.swp

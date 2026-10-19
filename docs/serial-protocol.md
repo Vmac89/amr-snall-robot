@@ -69,4 +69,4 @@ Wheel mixing from `cmd_vel` is intentionally not in this protocol. The CM4 sends
 
 ## Mission control page
 
-The dashboard in `web/mission-control/index.html` speaks same-origin HTTP. It does not send these serial lines. The routes it calls, and the absence of a bridge onto this protocol, are recorded in [mission-control.md](mission-control.md).
+The dashboard in `web/mission-control/index.html` speaks same-origin HTTP. It does not write these serial lines itself. `cm4/server` is the process that receives those HTTP routes and, for wheel commands, writes this protocol: `ESTOP` becomes `STOP`, and `DRIVE` query parameters become a `DRIVE` line. Encoder samples from `ENC` / `TELEM` are copied into `GET /api/data`. The route list and the fields that are not part of this protocol are in [mission-control.md](mission-control.md).

@@ -1,0 +1,67 @@
+# CM4 Mission Control server
+
+Flask process that serves `web/mission-control/index.html` and the HTTP routes that page calls. It runs on the Raspberry Pi CM4. Wheel commands and encoder samples use the ESP32 line protocol in [docs/serial-protocol.md](../../docs/serial-protocol.md).
+
+The stock dashboard does not send drive commands. Arrow keys, teaching, and mission playback stay in the browser. Motor commands are:
+
+```bash
+curl -X POST 'http://127.0.0.1:8080/api/cmd?action=DRIVE&left=80&right=-40'
+curl -X POST 'http://127.0.0.1:8080/api/cmd?action=ESTOP'
+```
+
+`ESTOP` and `STOP` are written to the ESP32 as `STOP`. `DRIVE` is written as `DRIVE <left> <right>` with each value limited to `-255..255`, matching the firmware. While either value is non-zero, the server repeats that `DRIVE` line every 200 ms so the firmware's 500 ms command timeout does not coast the motors.
+
+`GET /api/data` includes `enc_left` and `enc_right` from `ENC` lines. On connect the server sends `TELEM 1`, and the firmware then emits `ENC` about every 100 ms. `batt` and `dist` are the string `n/a`: the serial protocol has no battery voltage and no range reading. The page prints whatever truthy string it is given, and it would otherwise substitute `12.4` and `0`. `temp` is the CM4 CPU thermal zone when `/sys/class/thermal/thermal_zone0/temp` exists (Linux millidegrees), and `n/a` when that file is missing. It is not a motor or pack temperature.
+
+`/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. Otherwise the stream repeats a placeholder image. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`. Each step changes a setpoint by 5 degrees, clamped to ±30 degrees because that is libfreenect's `TILT_MAX_DEGREES`. The setpoint is sent only when libfreenect exposes a tilt function and the call returns. The page logs "Tilt success" whenever the JSON parses; the `applied` field is the one that says whether a device was commanded. The Kinect model string `1505` has not been matched to a libfreenect device.
+
+Map save/load uses a JSON file, `cm4/server/data/robzone_map.json` unless `AMR_MAP_PATH` is set. The page's alert text says `ROBZONE_MAP.JSON`; that string is in the HTML and is not the filename. `GET /api/read_map` is 404 until the first successful save, which is the page's "nothing saved yet" path.
+
+`POST /api/poweroff` does not shut the machine down unless `AMR_ALLOW_POWEROFF=1` (or `--allow-poweroff`) is set. The default is off, and the route then returns HTTP 403 with `status: error`. When it is armed, the server runs `shutdown -h now`. The process needs permission for that command. This halts the computer the server is running on.
+
+Mock serial (`--mock-serial` or `AMR_MOCK_SERIAL=1`) does not open a UART. It answers the same command lines as the firmware. While a non-zero `DRIVE` is latched, mock tick counts change by `command // 32` once per 100 ms telemetry period. That divisor is a stand-in so the dashboard has numbers to show. It is not an encoder count, gear ratio, or measured speed.
+
+Wheel radius and track width are still unset, so this server does not turn `cmd_vel` into wheel speeds and it does not publish odometry.
+
+## Run without hardware
+
+From this directory, with the repo root two levels up:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python3 server.py --mock-serial --host 127.0.0.1 --port 8080
+```
+
+Open `http://127.0.0.1:8080/`.
+
+Raspberry Pi OS can use distro packages instead of the venv when they are present: `python3-flask`, `python3-serial`, and `python3-pil`. Optional Kinect support is the distro's `python3-freenect` (and its udev rules), not a pip requirement. Confirm those package names on the image you are using. If the import or the device open fails, the placeholder frame is what `/video_feed` serves.
+
+```bash
+python3 -m unittest test_server.py
+```
+
+## Run against the ESP32
+
+The UART device node on this CM4 carrier is still unset. `/dev/ttyAMA0` is the default placeholder. Pick the node that matches the carrier and the device tree, then:
+
+```bash
+python3 server.py --serial-port /dev/ttyAMA0 --baud 115200 --host 0.0.0.0 --port 8080
+```
+
+The account needs access to that device (on Raspberry Pi OS, typically membership in `dialout`). If the port cannot be opened, HTTP still serves the page and `/api/data` reports `serial_connected: false`. Mock mode is not implied by a missing port; encoder fields stay null instead of being invented.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AMR_HOST` | `0.0.0.0` | Bind address |
+| `AMR_PORT` | `8080` | Bind port |
+| `AMR_SERIAL_PORT` | `/dev/ttyAMA0` | Placeholder UART path |
+| `AMR_SERIAL_BAUD` | `115200` | 8N1, same as the firmware |
+| `AMR_MOCK_SERIAL` | off | `1` enables the in-process ESP32 stand-in |
+| `AMR_ALLOW_POWEROFF` | off | `1` arms `shutdown -h now` |
+| `AMR_MAP_PATH` | `cm4/server/data/robzone_map.json` | Map file |
+
+## systemd
+
+`amr-mission-control.service` is an example. Paths, `User=amr`, and `AMR_SERIAL_PORT` are placeholders to edit. `AMR_ALLOW_POWEROFF=0` in that file. `ExecStart` uses `/usr/bin/python3`, so that interpreter needs Flask, pyserial, and Pillow installed (the apt packages above, or point `ExecStart` at a venv). Copy the unit to `/etc/systemd/system/`, then `systemctl daemon-reload` and `systemctl enable --now amr-mission-control.service`. The service user must be able to write the map directory.

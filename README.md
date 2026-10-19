@@ -10,7 +10,7 @@ Low-level control runs on an ESP32 DevKit V1: L298N PWM and direction for a diff
 
 The chassis and other mechanical parts are 3D printed. CAD and mesh files are not in the tree yet.
 
-A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-control`.
+A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-control`. `cm4/server` is the Flask process that serves it and bridges wheel commands to the ESP32 serial protocol.
 
 ## Repository layout
 
@@ -21,6 +21,7 @@ A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-cont
 | `hardware/3d-parts` | Future STL and STEP files. |
 | `hardware/electronics` | Proposed pinout. |
 | `web/mission-control` | ROBZONE Mission Control 11.2 dashboard (static HTML). |
+| `cm4/server` | Flask server for that page, plus the ESP32 serial bridge. |
 | `docs` | Serial protocol and notes on the dashboard's HTTP calls. |
 
 ## Hardware
@@ -102,24 +103,28 @@ colcon build --packages-select amr_base
 
 1. Bench-check grounds, the buck voltage, and the proposed pin map with the motors unplugged.
 2. Flash the ESP32 scaffold. With the wheels off the ground, exercise `DRIVE`, `STOP`, the command timeout, and `ENC`.
-3. Choose a ROS 2 distribution on the CM4 and implement the serial bridge: `cmd_vel` in, `DRIVE` out, encoder ticks in. Publish `odom` after wheel radius and track width are measured.
+3. Choose a ROS 2 distribution on the CM4. `cm4/server` already forwards per-wheel `DRIVE` / `STOP` and reads `ENC` for the web page. Mixing `cmd_vel` and publishing `odom` still wait on a measured wheel radius and track width.
 4. Identify the Kinect behind the user-supplied model string `1505`, including how it is powered. Link libfreenect for a supported Kinect v1-class device, or a Kinect v2 stack if that is what the sensor is.
 5. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.
 6. Teleoperate the base, then try autonomous navigation once odometry and depth are real.
 
 ## Mission control
 
-`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page, checked in as supplied. It draws a map, keeps a station list, and requests telemetry, a camera image, tilt, map save/load, emergency stop, and Pi shutdown from whatever host serves the file.
-
-Serve that directory and open the page in a browser:
+`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page, checked in as supplied. The CM4 server that implements its routes is `cm4/server`. Without hardware:
 
 ```bash
-python3 -m http.server 8080 --directory web/mission-control
+cd cm4/server
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python3 server.py --mock-serial --host 127.0.0.1 --port 8080
 ```
 
-Then open `http://127.0.0.1:8080/`.
+Open `http://127.0.0.1:8080/`.
 
-This static server only delivers the HTML. The page's `/api/...`, `/tilt/...`, and `/video_feed` routes are not implemented in this repository. Those calls, and the fact that they are separate from the ESP32 serial protocol, are listed in [docs/mission-control.md](docs/mission-control.md).
+`ESTOP` is sent to the ESP32 as `STOP`. `POST /api/cmd?action=DRIVE&left=<n>&right=<n>` is sent as `DRIVE`. The page's arrow keys do not call that route; they only move the on-screen cursor. `/api/data` carries `ENC` samples. Battery voltage and obstacle distance are not in the serial protocol, so those fields are `n/a`. Shutdown stays disabled unless `AMR_ALLOW_POWEROFF=1`. Kinect video uses libfreenect when it returns a frame, and a placeholder JPEG otherwise.
+
+Setup, the systemd example, and the field list are in [cm4/server/README.md](cm4/server/README.md). How each page route maps onto the firmware is in [docs/mission-control.md](docs/mission-control.md).
 
 ## License
 
