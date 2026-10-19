@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ROBZONE | MISSION CONTROL 11.2</title>
+    <style>
+        :root {
+            --neon-green: #00ff00;
+            --dark-bg: #050505;
+            --panel-bg: #111111;
+            --danger: #ff3333;
+            --info: #00d9ff;
+            --border: #222222;
+            --warning: #ffcc00;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--dark-bg);
+            color: var(--neon-green);
+            margin: 0;
+            display: grid;
+            grid-template-columns: 320px 1fr 340px;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        h2 { font-size: 0.8rem; color: var(--info); letter-spacing: 2px; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; margin: 0; }
+
+        .camera-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 5px; }
+        .cam-label { font-size: 0.7rem; color: var(--info); letter-spacing: 1px; }
+        
+        .switch { position: relative; display: inline-block; width: 34px; height: 18px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .3s; border-radius: 18px; }
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--info); }
+        input:checked + .slider:before { transform: translateX(16px); }
+
+        .video-box { width: 100%; border: 1px solid var(--border); background: #000; position: relative; }
+        #video-feed { width: 100%; display: block; min-height: 180px; }
+        #video-off-msg { height: 180px; display: none; align-items: center; justify-content: center; font-size: 0.6rem; color: #666; background: #080808; text-transform: uppercase; letter-spacing: 1px; }
+        .tilt-overlay { display: flex; background: #1a1a1a; border-top: 1px solid var(--border); }
+        .tilt-btn { flex: 1; padding: 10px; background: none; border: none; color: var(--info); cursor: pointer; font-size: 1.2rem; }
+        .tilt-btn:hover { background: #222; }
+
+        #map-area { position: relative; background: #000; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+        canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+
+        .stat-card { background: #181818; border: 1px solid #333; padding: 10px; border-radius: 2px; }
+        .stat-label { font-size: 0.6rem; color: #666; text-transform: uppercase; display: block; }
+        .stat-value { font-size: 1.2rem; font-family: monospace; font-weight: bold; }
+        .health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        .btn { background: transparent; border: 1px solid var(--neon-green); color: var(--neon-green); padding: 12px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.7rem; border-radius: 2px; }
+        .btn:hover { background: var(--neon-green); color: #000; }
+        .btn-danger { border-color: var(--danger); color: var(--danger); }
+        .btn-danger:hover { background: var(--danger); color: white; }
+        .btn-active { background: var(--danger); color: white; border-color: var(--danger); animation: blink 1s infinite; }
+        
+        .station-item { 
+            background: #151515; 
+            border: 1px solid #222; 
+            padding: 12px !important; 
+            margin-bottom: 10px; 
+            font-size: 0.75rem; 
+            border-radius: 2px; 
+            display: flex !important; 
+            flex-direction: column !important; 
+            gap: 10px !important; 
+            min-height: 75px !important; 
+            box-sizing: border-box;
+        }
+        .station-meta { color: #aaa; font-family: monospace; margin-top: 2px; }
+        .station-actions { 
+            display: flex !important; 
+            gap: 8px !important; 
+            width: 100%;
+            margin-top: auto;
+        }
+        .action-btn { 
+            flex: 1; 
+            background: #1c1c1c; 
+            border: 1px solid #444; 
+            color: #fff; 
+            padding: 6px 10px; 
+            font-size: 0.65rem; 
+            text-transform: uppercase; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 2px;
+            display: inline-block;
+            text-align: center;
+        }
+        .action-edit { border-color: var(--warning); color: var(--warning); }
+        .action-edit:hover { background: var(--warning); color: #000; }
+        .action-delete { border-color: var(--danger); color: var(--danger); }
+        .action-delete:hover { background: var(--danger); color: white; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9999; justify-content: center; align-items: center; }
+        .modal-content { background: #0d0d0d; border: 1px solid var(--info); padding: 30px; width: 420px; border-radius: 10px; font-size: 0.8rem; }
+        .modal-content label { display: block; margin-top: 10px; color: #888; font-size: 0.65rem; letter-spacing: 1px; }
+        .modal-content input, .modal-content select { width: 100%; background: #161616; border: 1px solid #333; color: white; padding: 12px; margin-top: 4px; box-sizing: border-box; outline: none; border-radius: 2px; }
+        
+        .modal-actions { display: flex; gap: 15px; margin-top: 30px; }
+        .modal-btn { flex: 1; padding: 15px; font-weight: bold; text-transform: uppercase; cursor: pointer; background: none; border-radius: 2px; }
+        .confirm { border: 1px solid var(--info); color: var(--info); }
+        .confirm:hover { background: var(--info); color: black; }
+        .cancel { border: 1px solid var(--danger); color: var(--danger); }
+        .cancel:hover { background: var(--danger); color: white; }
+
+        @keyframes blink { 50% { opacity: 0.4; } }
+    </style>
+</head>
+<body>
+
+    <div class="panel">
+        <div class="camera-header">
+            <span class="cam-label">LIVE FEED</span>
+            <label class="switch">
+                <input type="checkbox" id="cam-toggle" checked onchange="toggleVideo()">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="video-box">
+            <div id="video-off-msg">KINECT_OFFLINE // BANDWIDTH_SAVED</div>
+            <img id="video-feed" src="/video_feed" onerror="this.style.display='none'; document.getElementById('video-off-msg').style.display='flex';">
+            <div class="tilt-overlay">
+                <button class="tilt-btn" onclick="sendTilt('up')">▲</button>
+                <button class="tilt-btn" onclick="sendTilt('down')">▼</button>
+            </div>
+        </div>
+
+        <h2>System Health</h2>
+        <div class="health-grid">
+            <div class="stat-card">
+                <span class="stat-label">Pi Temp</span>
+                <span id="temp-val" class="stat-value">0.0°C</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Battery</span>
+                <span id="batt-val" class="stat-value" style="color:var(--neon-green);">0.0V</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <span class="stat-label">Obstacle Scan</span>
+            <span id="radar-val" class="stat-value" style="color:#ffcc00;">0.0 CM</span>
+        </div>
+
+        <button id="rec-btn" class="btn" onclick="toggleRec()">🔴 START TEACHING</button>
+        <button class="btn btn-danger" style="margin-top: 5px; border-color: #ff9900; color: #ff9900;" onclick="clearTrail()">🗑️ CLEAR PATH TRACE</button>
+        <button class="btn" style="margin-top: 5px; border-color: var(--info); color: var(--info);" onclick="resetCursor()">📍 RESET CURSOR</button>
+        <button class="btn btn-danger" style="margin-top:auto; margin-bottom: 10px; background: rgba(255, 51, 51, 0.15); border-color: var(--danger); color: var(--danger);" onclick="triggerPowerOff()">🔌 SHUTDOWN RASPBERRY PI</button>
+        <button class="btn btn-danger" onclick="sendCmd('ESTOP')">⛔ EMERGENCY STOP</button>
+    </div>
+
+    <div id="map-area">
+        <canvas id="map-canvas"></canvas>
+    </div>
+
+    <div class="panel">
+        <h2>Station Network</h2>
+        <div id="station-list" style="flex: 1; overflow-y:auto;"></div>
+        <button class="btn" style="border-color: var(--info); color: var(--info); margin-bottom: 5px;" onclick="loadSavedMap()">📖 READ SAVED MAP</button>
+        <button class="btn" style="border-color: var(--warning); color: var(--warning); margin-bottom: 5px;" onclick="repeatMission()">🔁 REPEAT MISSION</button>
+        <button class="btn" onclick="sendCmd('SAVE_MAP')">💾 SAVE MAP DATA</button>
+    </div>
+
+    <div id="stationModal" class="modal">
+        <div class="modal-content">
+            <h2 id="modal-title" style="color:var(--info); border-bottom: 1px solid var(--info); padding-bottom:10px;">REGISTER STOP</h2>
+            <label>STATION NAME</label>
+            <input type="text" id="st-name" placeholder="NAME...">
+            <label>STATION TYPE</label>
+            <select id="st-type" onchange="toggleIPBox()">
+                <option value="v">VIRTUAL (Timed Pause)</option>
+                <option value="p">PHYSICAL (ESP32 Node)</option>
+            </select>
+            <div id="ip-box" style="display:none;">
+                <label>ESP32 IP ADDRESS</label>
+                <input type="text" id="st-ip" value="10.42.0.50">
+            </div>
+            <label>PAUSE DURATION (SEC)</label>
+            <input type="number" id="st-time" value="10">
+            <div class="modal-actions">
+                <button class="modal-btn confirm" onclick="confirmStation()">Confirm</button>
+                <button class="modal-btn cancel" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('map-canvas');
+        const ctx = canvas.getContext('2d');
+        let stations = [];
+        let trail = [];
+        let robotPos = { x: 0, y: 0, angle: -Math.PI / 2 };
+        let isRecording = false;
+        let isRepeating = false;
+        let pendingClickPos = null;
+        let editingStationIndex = null;
+        let startPoint = { x: 0, y: 0, angle: -Math.PI / 2 };
+
+        function init() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+            
+            startPoint.x = canvas.width / 2;
+            startPoint.y = canvas.height / 2;
+            resetCursor();
+            
+            canvas.addEventListener('click', handleCanvasClick);
+            window.addEventListener('keydown', handleKeyboardControl);
+            
+            setInterval(fetchTelemetry, 1000);
+            animateRobotSimulation();
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = '#111111';
+            ctx.lineWidth = 1;
+            for(let i=0; i<canvas.width; i+=40) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
+            }
+
+            if (trail.length > 1) {
+                ctx.strokeStyle = isRepeating ? 'var(--info)' : 'rgba(0, 255, 0, 0.5)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(trail[0].x, trail[0].y);
+                for(let i = 1; i < trail.length; i++) {
+                    ctx.lineTo(trail[i].x, trail[i].y);
+                }
+                ctx.stroke();
+            }
+
+            stations.forEach((st) => {
+                ctx.fillStyle = st.type === 'p' ? varColor('--info') : varColor('--neon-green');
+                ctx.beginPath();
+                ctx.arc(st.x, st.y, 6, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px monospace';
+                ctx.fillText(st.name, st.x + 10, st.y + 4);
+            });
+
+            ctx.save();
+            ctx.translate(robotPos.x, robotPos.y);
+            ctx.rotate(robotPos.angle);
+            ctx.strokeStyle = isRepeating ? varColor('--info') : varColor('--neon-green');
+            ctx.lineWidth = 2;
+            ctx.fillStyle = isRepeating ? 'rgba(0, 217, 255, 0.15)' : 'rgba(0, 255, 0, 0.15)';
+            
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -10);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function varColor(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || name;
+        }
+
+        function resetCursor() {
+            if (isRepeating) return;
+            robotPos.x = startPoint.x;
+            robotPos.y = startPoint.y;
+            robotPos.angle = startPoint.angle;
+            if(isRecording) {
+                trail.push({ x: robotPos.x, y: robotPos.y });
+            }
+        }
+
+        function fetchTelemetry() {
+            fetch('/api/data')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('temp-val').innerText = (data.temp || '0.0') + '°C';
+                    document.getElementById('batt-val').innerText = (data.batt || '12.4') + 'V';
+                    document.getElementById('radar-val').innerText = (data.dist || '0') + ' CM';
+                })
+                .catch(() => console.log("Telemetry link offline."));
+        }
+
+        function sendTilt(direction) {
+            fetch(`/tilt/${direction}`)
+                .then(res => res.json())
+                .then(data => console.log(`Tilt success: ${data.angle}`))
+                .catch(() => console.error("Hardware tilt injection failed."));
+        }
+
+        function sendCmd(command) {
+            if (command === 'SAVE_MAP') {
+                const mapDataPayload = {
+                    stations: stations, 
+                    trail: trail,
+                    robotPos: robotPos,
+                    startPoint: startPoint
+                };
+
+                fetch('/api/save_map', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(mapDataPayload)
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if(data.status === 'success') alert("💾 MAP OVERWRITTEN SUCCESSFULLY ON RASPBERRY PI!");
+                })
+                .catch(() => alert("❌ CONNECTION FAILURE: Server unreachable."));
+            } else {
+                fetch(`/api/cmd?action=${command}`, { method: 'POST' });
+            }
+        }
+
+        function loadSavedMap() {
+            fetch('/api/read_map')
+                .then(res => {
+                    if(!res.ok) throw new Error("No file profile saved yet.");
+                    return res.json();
+                })
+                .then(data => {
+                    stations = data.stations || [];
+                    trail = data.trail || [];
+                    if(data.startPoint) startPoint = data.startPoint;
+                    if(data.robotPos) robotPos = data.robotPos;
+                    updateStationList();
+                    alert("📖 CONFIGURATION LOADED FROM ROBZONE_MAP.JSON");
+                })
+                .catch(err => alert("⚠️ READ FAILURE: " + err.message));
+        }
+
+        function repeatMission() {
+            if (trail.length === 0) {
+                alert("❌ REPEAT REJECTION: Load or record a path trace profile first!");
+                return;
+            }
+            if (isRepeating || isRecording) return;
+            
+            isRepeating = true;
+            let currentStep = 0;
+
+            function runPlaybackStep() {
+                if (!isRepeating) return;
+                
+                if (currentStep >= trail.length) {
+                    isRepeating = false;
+                    alert("🔁 MISSION EXECUTION COMPLETED!");
+                    return;
+                }
+
+                let targetNode = trail[currentStep];
+                if (currentStep > 0) {
+                    let prevNode = trail[currentStep - 1];
+                    robotPos.angle = Math.atan2(targetNode.y - prevNode.y, targetNode.x - prevNode.x);
+                }
+                
+                robotPos.x = targetNode.x;
+                robotPos.y = targetNode.y;
+
+                let dynamicDelay = 50; 
+                let stationHaltTriggered = false;
+                let activeStationName = "";
+                let activeStationDuration = 0;
+
+                stations.forEach(st => {
+                    let distance = Math.hypot(robotPos.x - st.x, robotPos.y - st.y);
+                    if (distance < 6 && !st.triggered) {
+                        st.triggered = true;
+                        stationHaltTriggered = true;
+                        activeStationName = st.name;
+                        activeStationDuration = parseInt(st.duration) || 5; 
+                    }
+                });
+
+                currentStep++;
+
+                if (stationHaltTriggered) {
+                    console.log(`[STATION HALT] Arrived at: ${activeStationName}. Halting mission for ${activeStationDuration}s.`);
+                    dynamicDelay = activeStationDuration * 1000;
+                }
+
+                setTimeout(runPlaybackStep, dynamicDelay);
+            }
+            
+            stations.forEach(st => st.triggered = false);
+            runPlaybackStep();
+        }
+
+        function clearTrail() {
+            if (isRepeating) return;
+            if (confirm("⚠️ CLEAR PATH DATA? This will erase the current green vector trace array from your view.")) {
+                trail = [];
+            }
+        }
+
+        function triggerPowerOff() {
+            if (confirm("⚠️ CRITICAL SYSTEM DIRECTIVE ⚠️\n\nAre you absolutely sure you want to turn off the Raspberry Pi completely? All unsaved tracking matrices will be lost.")) {
+                fetch('/api/poweroff', { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert("🔌 SHUTDOWN PACKET RECEIVED.\n\nSystem powering off. OLED will display shutdown banner shortly.");
+                        } else {
+                            alert("❌ SHUTDOWN ERROR: " + data.message);
+                        }
+                    })
+                    .catch(() => {
+                        alert("🔌 HOST DISCONNECTED: System power-off sequence has initialized.");
+                    });
+            }
+        }
+
+        function toggleVideo() {
+            const checkBox = document.getElementById('cam-toggle');
+            const feed = document.getElementById('video-feed');
+            const msg = document.getElementById('video-off-msg');
+            if (checkBox.checked) {
+                feed.src = "/video_feed"; feed.style.display = "block"; msg.style.display = "none";
+            } else {
+                feed.src = ""; feed.style.display = "none"; msg.style.display = "flex";
+            }
+        }
+
+        function toggleRec() {
+            if (isRepeating) return;
+            isRecording = !isRecording;
+            const btn = document.getElementById('rec-btn');
+            if(isRecording) {
+                btn.innerText = "⏹ STOP TEACHING";
+                btn.classList.add('btn-active');
+                trail = [{ x: robotPos.x, y: robotPos.y }];
+            } else {
+                btn.innerText = "🔴 START TEACHING";
+                btn.classList.remove('btn-active');
+            }
+        }
+
+        function handleKeyboardControl(e) {
+            if (!isRecording || isRepeating) return;
+            const moveSpeed = 4;
+            const turnSpeed = 0.15;
+
+            if (e.key === 'ArrowUp') {
+                robotPos.x += Math.cos(robotPos.angle) * moveSpeed;
+                robotPos.y += Math.sin(robotPos.angle) * moveSpeed;
+                trail.push({ x: robotPos.x, y: robotPos.y });
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                robotPos.x -= Math.cos(robotPos.angle) * moveSpeed;
+                robotPos.y -= Math.sin(robotPos.angle) * moveSpeed;
+                trail.push({ x: robotPos.x, y: robotPos.y });
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft') {
+                robotPos.angle -= turnSpeed; e.preventDefault();
+            } else if (e.key === 'ArrowRight') {
+                robotPos.angle += turnSpeed; e.preventDefault();
+            }
+            
+            robotPos.x = Math.max(10, Math.min(canvas.width - 10, robotPos.x));
+            robotPos.y = Math.max(10, Math.min(canvas.height - 10, robotPos.y));
+        }
+
+        function handleCanvasClick(e) {
+            if(e.target.tagName === 'BUTTON' || e.target.closest('.modal-content') || isRepeating) return;
+
+            const rect = canvas.getBoundingClientRect();
+            pendingClickPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            editingStationIndex = null;
+            document.getElementById('modal-title').innerText = "REGISTER STOP";
+            document.getElementById('st-name').value = "";
+            document.getElementById('st-type').value = "v";
+            document.getElementById('st-time').value = "10";
+            toggleIPBox();
+            document.getElementById('stationModal').style.display = 'flex';
+        }
+
+        function toggleIPBox() {
+            const type = document.getElementById('st-type').value;
+            document.getElementById('ip-box').style.display = type === 'p' ? 'block' : 'none';
+        }
+
+        function closeModal() {
+            document.getElementById('stationModal').style.display = 'none';
+            pendingClickPos = null; editingStationIndex = null;
+        }
+
+        function editStation(index) {
+            if (isRepeating) return;
+            editingStationIndex = index;
+            const st = stations[index];
+            document.getElementById('modal-title').innerText = "EDIT REGISTERED STOP";
+            document.getElementById('st-name').value = st.name;
+            document.getElementById('st-type').value = st.type;
+            document.getElementById('st-time').value = st.duration;
+            if(st.type === 'p') document.getElementById('st-ip').value = st.ip;
+            toggleIPBox();
+            pendingClickPos = { x: st.x, y: st.y };
+            document.getElementById('stationModal').style.display = 'flex';
+        }
+
+        function deleteStation(index) {
+            if (isRepeating) return;
+            if(confirm(`Remove target stop entry [ST-${index}] permanently?`)) {
+                stations.splice(index, 1);
+                updateStationList();
+            }
+        }
+
+        function updateStationList() {
+            const container = document.getElementById('station-list');
+            container.innerHTML = '';
+            stations.forEach((st, idx) => {
+                const div = document.createElement('div');
+                div.className = 'station-item';
+                div.innerHTML = `
+                    <div>
+                        <strong>[ST-${idx}] ${st.name}</strong>
+                        <div class="station-meta">Type: ${st.type === 'p' ? 'ESP32 Node ('+st.ip+')' : 'Virtual'} | Halt: ${st.duration}s</div>
+                    </div>
+                    <div class="station-actions">
+                        <button class="action-btn action-edit" onclick="event.stopPropagation(); editStation(${idx});">📝 Edit</button>
+                        <button class="action-btn action-delete" onclick="event.stopPropagation(); deleteStation(${idx});">❌ Delete</button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function confirmStation() {
+            const name = document.getElementById('st-name').value || "UNNAMED_NODE";
+            const type = document.getElementById('st-type').value;
+            const ip = document.getElementById('st-ip').value;
+            const duration = document.getElementById('st-time').value;
+
+            if(pendingClickPos) {
+                const targetStation = { x: pendingClickPos.x, y: pendingClickPos.y, name: name, type: type, ip: type === 'p' ? ip : null, duration: duration };
+                if (editingStationIndex !== null) stations[editingStationIndex] = targetStation;
+                else stations.push(targetStation);
+                updateStationList();
+            }
+            closeModal();
+        }
+
+        function animateRobotSimulation() {
+            render();
+            requestAnimationFrame(animateRobotSimulation);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

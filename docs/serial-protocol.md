@@ -66,3 +66,7 @@ OK
 Tick sign follows the quadrature decode in `firmware/esp32/src/encoders.cpp`. Which mechanical direction increments a count is unset until the encoder wiring is checked. One encoder channel swapped with the other flips the sign.
 
 Wheel mixing from `cmd_vel` is intentionally not in this protocol. The CM4 sends per-wheel commands after it has a measured wheel radius and track width.
+
+## Mission control page
+
+The dashboard in `web/mission-control/index.html` speaks same-origin HTTP. It does not send these serial lines. The routes it calls, and the absence of a bridge onto this protocol, are recorded in [mission-control.md](mission-control.md).

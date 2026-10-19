@@ -10,6 +10,8 @@ Low-level control runs on an ESP32 DevKit V1: L298N PWM and direction for a diff
 
 The chassis and other mechanical parts are 3D printed. CAD and mesh files are not in the tree yet.
 
+A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-control`.
+
 ## Repository layout
 
 | Path | Contents |
@@ -18,7 +20,8 @@ The chassis and other mechanical parts are 3D printed. CAD and mesh files are no
 | `ros2_ws/src/amr_base` | Placeholder ROS 2 package: base-driver bridge and Kinect bringup. |
 | `hardware/3d-parts` | Future STL and STEP files. |
 | `hardware/electronics` | Proposed pinout. |
-| `docs` | Serial protocol. |
+| `web/mission-control` | ROBZONE Mission Control 11.2 dashboard (static HTML). |
+| `docs` | Serial protocol and notes on the dashboard's HTTP calls. |
 
 ## Hardware
 
@@ -103,6 +106,20 @@ colcon build --packages-select amr_base
 4. Identify the Kinect behind the user-supplied model string `1505`, including how it is powered. Link libfreenect for a supported Kinect v1-class device, or a Kinect v2 stack if that is what the sensor is.
 5. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.
 6. Teleoperate the base, then try autonomous navigation once odometry and depth are real.
+
+## Mission control
+
+`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page, checked in as supplied. It draws a map, keeps a station list, and requests telemetry, a camera image, tilt, map save/load, emergency stop, and Pi shutdown from whatever host serves the file.
+
+Serve that directory and open the page in a browser:
+
+```bash
+python3 -m http.server 8080 --directory web/mission-control
+```
+
+Then open `http://127.0.0.1:8080/`.
+
+This static server only delivers the HTML. The page's `/api/...`, `/tilt/...`, and `/video_feed` routes are not implemented in this repository. Those calls, and the fact that they are separate from the ESP32 serial protocol, are listed in [docs/mission-control.md](docs/mission-control.md).
 
 ## License
 
