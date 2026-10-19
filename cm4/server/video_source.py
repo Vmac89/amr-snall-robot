@@ -1,6 +1,7 @@
 """Kinect MJPEG source with a drawn placeholder when libfreenect is absent.
 
-Model string 1505 has not been identified as a libfreenect device. Tilt uses
+Model 1414 is the Xbox 360 Kinect. libfreenect is the matching library.
+The Bookworm apt package 0.5.3 did not open it; see docs/bring-up.md. Tilt uses
 libfreenect's own limit (TILT_MAX_DEGREES, 30) only when that library accepts
 the call. The angle reported to the page is the commanded setpoint.
 """

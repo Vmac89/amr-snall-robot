@@ -23,7 +23,7 @@ ament_target_dependencies(base_driver_node
 add_executable(kinect_freenect_node src/kinect_freenect_node.cpp)
 ament_target_dependencies(kinect_freenect_node rclcpp sensor_msgs)
 
-# Optional. Model string 1505 has not been confirmed as a libfreenect device.
+# Optional. Model 1414 is an Xbox 360 Kinect, which this library targets.
 find_path(FREENECT_INCLUDE_DIR libfreenect/libfreenect.h)
 find_library(FREENECT_LIBRARY freenect)
 if(FREENECT_INCLUDE_DIR AND FREENECT_LIBRARY)

@@ -45,7 +45,7 @@ Expect `PONG`, then `ENC <left> <right> <battery_mv>`. With the divider ratio st
 
 ## 3. CM4 install
 
-On the CM4, from a login user (not as root):
+This robot's host is a Waveshare CM4-Duino running Raspberry Pi OS Lite (Bookworm). On the CM4, from a login user (not as root):
 
 ```bash
 bash cm4/install.sh
@@ -79,9 +79,33 @@ With the wheels still unloaded, or with the chassis rolled a known distance:
 3. Measure the wheel diameter and the distance between the two contact patches. Placeholders are `0.065` m and `0.20` m (`AMR_WHEEL_DIAMETER_M`, `AMR_TRACK_WIDTH_M`).
 4. Roll straight a measured distance and compare with `odom.x` on `/api/data`. Adjust diameter, then ticks, until it agrees. Then set `AMR_GEOMETRY_CALIBRATED=1`. Until that flag is set, `odom.calibrated` stays false even though a pose is still computed from the placeholders.
 
-## 6. Kinect distance
+## 6. Kinect (model 1414)
 
-Model string `1505` is unverified. Power for that sensor is unset. With libfreenect installed and the device enumerating, `/api/data` field `dist` becomes centimetres from the center of the depth frame, and `kinect_live` can become true. `dist_calibrated` stays false. Check a few known gaps with a tape before trusting `dist`. If the camera does not face forward, the center window is the wrong obstacle.
+The sensor is the original Xbox 360 Kinect, model `1414` (Kinect v1). Plug its USB into the CM4 and power it from its own 12 V adapter. The CM4 USB port does not power this sensor.
+
+`cm4/install.sh` does not install libfreenect. On this Bookworm image, apt `libfreenect` 0.5.3 fails in the depth path with `Failed to fetch zero plane info`. Build the library from the OpenKinect git tree instead. The CMake Python option fails with `list GET given empty list`, so leave Python out of that build and install the wrapper with `setup.py`.
+
+```bash
+sudo apt-get install -y cmake build-essential libusb-1.0-0-dev python3-dev python3-setuptools
+git clone https://github.com/OpenKinect/libfreenect.git
+cd libfreenect
+mkdir build && cd build
+cmake .. -DBUILD_PYTHON3=OFF
+make
+sudo make install
+sudo ldconfig
+cd ../wrappers/python
+sudo python3 setup.py install
+sudo install -m 644 ../../platform/linux/udev/51-kinect.rules /etc/udev/rules.d/51-kinect.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+USB autosuspend has to be off or the Kinect drops off the bus. A setting that stays across reboot is `usbcore.autosuspend=-1` at the end of the single line in `/boot/firmware/cmdline.txt`. Reboot after editing that file.
+
+`otg_mode=1` under the `[cm4]` section of `/boot/firmware/config.txt` is the USB-host line tried on this Waveshare CM4-Duino. It is still being verified. This repo does not write that file. A wrong boot overlay can keep the board from booting, so confirm the line before relying on it, and do not treat a missing camera as a finished library build until that check is done.
+
+With the source-built libfreenect importing and the device enumerating, `/api/data` field `dist` becomes centimetres from the center of the depth frame, and `kinect_live` can become true. `dist_calibrated` stays false. Check a few known gaps with a tape before trusting `dist`. If the camera does not face forward, the center window is the wrong obstacle.
 
 `AMR_OBSTACLE_CM` defaults to `40` (CALIBRATE). When `dist` is a number below that threshold, forward wheel commands are forced to zero and reverse is still allowed. A missing distance does not block motion. Set `AMR_OBSTACLE_CALIBRATED=1` only after the tape check. The flag is reported; it does not by itself change the threshold.
 
@@ -91,7 +115,7 @@ Wheels on the ground, a clear lane, a hand on ESTOP.
 
 1. Tap forward and release. The robot should start and then coast when you release.
 2. Confirm left and right spins match the pad.
-3. Teach a short path, then REPEAT MISSION. The page treats screen-up as robot forward and posts `DRIVE` along the trace. Station pauses post a stop for the pause duration. Confirm that mapping on the floor; the 0.5 rad spin threshold is a tune.
+3. Teach a short path, then REPEAT MISSION. Playback repeats the recorded wheel commands from the current pose and then stops. A station under the marker pauses the timeline.
 4. Cover or approach an obstacle inside the threshold and confirm forward motion stops while reverse still works.
 5. Press ESTOP and confirm drive stays rejected until RESET.
 

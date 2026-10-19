@@ -72,7 +72,7 @@ flowchart LR
 
 ## Kinect
 
-Data path is USB from the Kinect to the CM4. The user-supplied model string is `1505`. Power requirements for that model are unset, so the Kinect is not assumed to run from the CM4 USB port alone.
+Data path is USB from the Kinect to the CM4. The sensor is model `1414`, the original Xbox 360 Kinect. Power it from its own 12 V adapter. Do not run it from the CM4 USB port alone.
 
 ## GPIOs left unused
 

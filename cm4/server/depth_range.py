@@ -1,8 +1,8 @@
 """Front obstacle distance from a Kinect depth frame.
 
 The center window assumes the camera faces the robot's forward direction.
-That mount has not been measured. Model string 1505 has not been confirmed
-as a libfreenect device. dist_calibrated stays false upstream.
+That mount has not been measured. The sensor is model 1414, the Xbox 360
+Kinect (v1). dist_calibrated stays false upstream.
 
 Millimetre frames are used as reported. 11-bit raw frames use the
 OpenKinect raw-to-millimetre conversion (the one shipped with libfreenect

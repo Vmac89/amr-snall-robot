@@ -6,7 +6,7 @@ Electrical and mechanical numbers for this robot are unset until they are measur
 
 ## Overview
 
-Low-level control runs on an ESP32 DevKit V1: L298N PWM and direction for a differential drive, quadrature counts from the motor hall encoders, and a small serial protocol. High-level compute is a Raspberry Pi Compute Module 4 on a Duino-style carrier, with ROS 2 as the intended software stack. Depth sensing is a Microsoft Kinect for Xbox. The model string supplied for this repo is `1505`; it has not been matched to a Kinect generation here.
+Low-level control runs on an ESP32 DevKit V1: L298N PWM and direction for a differential drive, quadrature counts from the motor hall encoders, and a small serial protocol. High-level compute is a Raspberry Pi Compute Module 4 on a Waveshare CM4-Duino, with ROS 2 as the intended software stack. Depth sensing is a Microsoft Kinect for Xbox 360, model `1414`. That is a Kinect v1, so the matching library is libfreenect. The image used on this board is Raspberry Pi OS Lite (Bookworm).
 
 The chassis and other mechanical parts are 3D printed. CAD and mesh files are not in the tree yet.
 
@@ -31,9 +31,9 @@ A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-cont
 | --- | --- | --- | --- |
 | — | 3D-printed chassis and parts | Mechanical structure | No files yet. See `hardware/3d-parts`. |
 | 1 | ESP32 DevKit V1 | Motor PWM, encoder counts, serial link | WROOM-32 DevKit assumed for the pin map. |
-| 1 | Raspberry Pi CM4 on a Duino-style carrier | High-level compute, intended ROS 2 host | RAM, storage, and carrier part number are unset. |
+| 1 | Raspberry Pi CM4 on a Waveshare CM4-Duino | High-level compute, intended ROS 2 host | Raspberry Pi OS Lite (Bookworm). RAM and storage are unset. |
 | 2 | JGA25-370 DC gear motor with hall encoder | Left and right differential drive | Rated voltage, gear ratio, and encoder counts are unset. This name covers more than one motor variant. |
-| 1 | Microsoft Kinect for Xbox | Depth sensor | User-supplied model string: `1505`. |
+| 1 | Microsoft Kinect for Xbox 360, model 1414 | Depth sensor | Kinect v1. USB data to the CM4. Power is its own 12 V adapter. |
 | 1 | L298N motor driver | Dual H-bridge for the two motors | Module current rating and input thresholds are unset. |
 | 1 | Step-down buck converter | Logic supply from the battery | Output voltage and current rating are unset. |
 | 1 | 12 V battery | Main pack | Chemistry and capacity are unset. |
@@ -46,12 +46,12 @@ Motor current is drawn from the battery into the L298N motor supply. The buck fe
 flowchart TD
   bat["12V battery"] --> buck["Step-down buck converter"]
   bat -->|"motor supply"| l298["L298N motor driver"]
-  buck -->|"logic supply"| cm4["Raspberry Pi CM4 on Duino-style carrier"]
+  buck -->|"logic supply"| cm4["Raspberry Pi CM4 on Waveshare CM4-Duino"]
   buck -->|"logic supply"| esp["ESP32 DevKit V1"]
   esp -->|"PWM and direction"| l298
   l298 --> motors["JGA25-370 DC gear motors"]
   enc["Hall encoders"] --> esp
-  kinect["Kinect for Xbox, model 1505 user-supplied"] --> cm4
+  kinect["Kinect 1414, Xbox 360, USB data"] --> cm4
   esp <-->|"serial"| cm4
 ```
 
@@ -68,7 +68,7 @@ Confirm these on the bench. Details and the proposed GPIO map are in [hardware/e
 - Fuse the motor supply. Stall current of these motors, and the continuous rating of this L298N module, are unset.
 - Cross ESP32 UART2 TX/RX to the CM4 UART, and share ground. The carrier header and the Linux device node are unset. Both ends are expected to be 3.3 V logic; confirm the header.
 - Leave ESP32 strapping pins (GPIO 0, 2, 12, 15), the USB console (GPIO 1 and 3), and the flash pins (GPIO 6–11) out of the harness.
-- Kinect data is USB into the CM4. Power for the user-supplied model `1505` is unset, so the sensor is not assumed to run from the CM4 USB port alone.
+- Kinect model `1414` data is USB into the CM4. Power it from its own 12 V adapter. Do not expect the sensor to run from the CM4 USB port alone.
 - Many L298N boards can put an onboard regulator onto a `+5V` pin via a jumper. Confirm that jumper on the silkscreen before using the pin to power anything.
 
 ## Serial link
@@ -90,7 +90,7 @@ The `espressif32` platform pinned in `platformio.ini` packages Arduino-ESP32 2.0
 `ros2_ws/src/amr_base` is the CM4 ROS 2 bridge. It was not compiled here (no ROS distro in this environment).
 
 - `base_driver_node` opens the ESP32 UART, mixes `cmd_vel` into `DRIVE` with the placeholders in `cm4/server/calibration.py`, and publishes `odom` and tf from encoder ticks. Stop `cm4/server` first. Both cannot own the UART.
-- `kinect_freenect_node` publishes image and depth topics when libfreenect is found at build time. Otherwise it stays quiet. Whether model `1505` is a libfreenect device is unset. Camera intrinsics are zeros.
+- `kinect_freenect_node` publishes image and depth topics when libfreenect is found at build time. Otherwise it stays quiet. Model `1414` is the Xbox 360 Kinect, which libfreenect targets. The Bookworm apt package did not open it; the source build is in [docs/bring-up.md](docs/bring-up.md). Camera intrinsics are zeros.
 
 The ROS 2 distribution on the CM4 is not chosen. When one is installed:
 
@@ -107,7 +107,7 @@ The software path for teleop, battery sense, Kinect distance, odometry, and a RO
 1. Bench-check grounds, the buck voltage, the battery divider (meter it before GPIO 4), and the proposed pin map with the motors unplugged.
 2. Flash the ESP32. Confirm `ENC` ticks and that `battery_mv` matches a meter after `kBatteryDividerRatio` is set. Wheels up, check motor direction.
 3. Measure ticks per revolution, wheel diameter, and track width. Set the matching `AMR_*` values, then `AMR_GEOMETRY_CALIBRATED=1` only after a taped distance agrees with `odom`.
-4. Identify the Kinect behind the user-supplied model string `1505`, including how it is powered. `dist` stays uncalibrated until a tape check. Then set `AMR_OBSTACLE_CM`.
+4. Finish the Kinect bring-up in [docs/bring-up.md](docs/bring-up.md). Model `1414` uses its 12 V adapter. `dist` stays uncalibrated until a tape check. `otg_mode=1` under `[cm4]` is still being verified. Then set `AMR_OBSTACLE_CM`.
 5. Choose a ROS 2 distribution and `colcon build` `amr_base`. Do not run it together with `cm4/server`.
 6. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.
 

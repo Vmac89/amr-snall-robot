@@ -18,12 +18,11 @@ echo "Repo: ${ROOT}"
 sudo apt-get update
 sudo apt-get install -y python3-flask python3-serial python3-pil
 
-if apt-cache show python3-freenect >/dev/null 2>&1; then
-  sudo apt-get install -y python3-freenect libfreenect-dev \
-    || echo "freenect packages did not install. /video_feed stays on the placeholder."
-else
-  echo "python3-freenect is not in this apt cache. Kinect support stays optional."
-fi
+# Kinect model 1414 (Xbox 360). apt libfreenect 0.5.3 on Raspberry Pi OS
+# Bookworm fails with "Failed to fetch zero plane info". Do not install it
+# here. The source build, udev rules, USB autosuspend, and otg_mode note
+# are in docs/bring-up.md. This script does not edit the boot config.
+echo "Kinect: skip apt libfreenect. Build from source using ${ROOT}/docs/bring-up.md."
 
 if ! id -nG "${USER}" | tr ' ' '\n' | grep -qx dialout; then
   sudo usermod -aG dialout "${USER}"

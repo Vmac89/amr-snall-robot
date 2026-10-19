@@ -24,7 +24,7 @@ Geometry and the `cmd_vel` gain are the same placeholders as `cm4/server/calibra
 
 `cmd_vel` is mixed as `v_left = linear.x - angular.z * track / 2` and the same with a plus for the right wheel, then multiplied by `pwm_per_mps`. A fresh command is repeated about every 0.2 s so the firmware 500 ms timeout does not coast. If `cmd_vel` stops for `cmd_timeout_s` (0.3 s), the node sends `STOP`.
 
-Camera intrinsics are zeros. The Kinect model string supplied for this robot is `1505`, which has not been matched to a generation. CMake defines `AMR_HAS_FREENECT` only when `libfreenect/libfreenect.h` and `libfreenect` are both found.
+Camera intrinsics are zeros. The Kinect is model `1414`, the Xbox 360 Kinect (v1). CMake defines `AMR_HAS_FREENECT` only when `libfreenect/libfreenect.h` and `libfreenect` are both found. The Bookworm apt package did not open this sensor; the source build is in [docs/bring-up.md](../../../docs/bring-up.md).
 
 When a ROS 2 distro is installed on the build machine:
 

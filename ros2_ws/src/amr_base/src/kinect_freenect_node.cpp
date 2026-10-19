@@ -2,8 +2,8 @@
 // library are found (AMR_HAS_FREENECT). Otherwise the node advertises the
 // topics and exits the camera loop with a warning.
 //
-// The user-supplied model string is "1505". That has not been confirmed as
-// a libfreenect device. Camera intrinsics are left unset: K and D are zeros,
+// Model 1414 is the original Xbox 360 Kinect (v1), which libfreenect targets.
+// Camera intrinsics are left unset: K and D are zeros,
 // not a nominal Kinect focal length.
 // This file was not colcon-built in the environment that added it.
 
@@ -57,7 +57,7 @@ class KinectFreenectNode : public rclcpp::Node {
     RCLCPP_WARN(
         get_logger(),
         "libfreenect was not found at build time. %s, %s, and %s stay quiet. "
-        "User-supplied model string: 1505.",
+        "Kinect model 1414 (Xbox 360).",
         image_pub_->get_topic_name(), depth_pub_->get_topic_name(),
         info_pub_->get_topic_name());
     rclcpp::spin(shared_from_this());
@@ -123,7 +123,7 @@ class KinectFreenectNode : public rclcpp::Node {
     if (freenect_open_device(ctx, &dev, 0) < 0 || dev == nullptr) {
       RCLCPP_ERROR(
           get_logger(),
-          "freenect_open_device failed. Model string 1505 is unverified.");
+          "freenect_open_device failed for Kinect model 1414. See docs/bring-up.md.");
       freenect_shutdown(ctx);
       return;
     }

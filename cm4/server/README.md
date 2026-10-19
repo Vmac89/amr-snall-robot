@@ -16,7 +16,7 @@ curl -X POST 'http://127.0.0.1:8080/api/cmd?action=RESET'
 
 If `dist` is a number below `AMR_OBSTACLE_CM` (placeholder 40), positive wheel commands are zeroed and reverse is still allowed. A missing distance does not block motion.
 
-`/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. Otherwise the stream repeats a placeholder image. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`. Each step changes a setpoint by 5 degrees, clamped to ±30 degrees because that is libfreenect's `TILT_MAX_DEGREES`. The setpoint is sent only when libfreenect exposes a tilt function and the call returns. The page logs "Tilt success" whenever the JSON parses; the `applied` field is the one that says whether a device was commanded. The Kinect model string `1505` has not been matched to a libfreenect device.
+`/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. Otherwise the stream repeats a placeholder image. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`. Each step changes a setpoint by 5 degrees, clamped to ±30 degrees because that is libfreenect's `TILT_MAX_DEGREES`. The setpoint is sent only when libfreenect exposes a tilt function and the call returns. The page logs "Tilt success" whenever the JSON parses; the `applied` field is the one that says whether a device was commanded. The Kinect is model `1414` (Xbox 360, Kinect v1). apt `libfreenect` 0.5.3 on Raspberry Pi OS Bookworm did not open it. The source build is in [docs/bring-up.md](../../docs/bring-up.md).
 
 Map save/load uses a JSON file, `cm4/server/data/robzone_map.json` unless `AMR_MAP_PATH` is set. The page's alert text says `ROBZONE_MAP.JSON`; that string is in the HTML and is not the filename. `GET /api/read_map` is 404 until the first successful save, which is the page's "nothing saved yet" path.
 
@@ -45,7 +45,7 @@ pip install -r requirements.txt
 python3 server.py --mock-serial --host 127.0.0.1 --port 8080
 ```
 
-Optional Kinect support is the distro's `python3-freenect` (and its udev rules), not a pip requirement. Confirm those package names on the image you are using. If the import or the device open fails, the placeholder frame is what `/video_feed` serves.
+Do not use apt `python3-freenect` / `libfreenect` 0.5.3 for this Kinect. On Raspberry Pi OS Bookworm that package fails with `Failed to fetch zero plane info`. Build libfreenect from source as written in [docs/bring-up.md](../../docs/bring-up.md). If the import or the device open fails, the placeholder frame is what `/video_feed` serves.
 
 ```bash
 python3 -m unittest test_server.py
