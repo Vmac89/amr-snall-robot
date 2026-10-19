@@ -238,6 +238,16 @@
         let odomView = { x: 0, y: 0 };
         let odomSample = null;
         let odomVel = { x: 0, y: 0, theta: 0 };
+        // Taught path. driveLog is timed wheel commands. odomPath is the pose
+        // samples those commands produced. Both go into a saved map.
+        let driveLog = [];
+        let odomPath = [];
+        let teachOrigin = null;
+        let teachT0 = 0;
+        let lastTeachCmd = null;
+        let replayOrigin = null;
+        let playT0 = 0;
+        let pauseUntil = 0;
 
         function init() {
             canvas.width = canvas.clientWidth;
@@ -274,13 +284,18 @@
                 ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
             }
 
-            if (trail.length > 1) {
+            // Taught path is odom waypoints, drawn in the current view.
+            // `trail` is the canvas copy kept for older saved maps.
+            const drawnPath = odomPath.length > 1
+                ? odomPath.map(function (p) { return odomToCanvas(p); })
+                : trail;
+            if (drawnPath.length > 1) {
                 ctx.strokeStyle = isRepeating ? 'var(--info)' : 'rgba(0, 255, 0, 0.5)';
                 ctx.lineWidth = 3;
                 ctx.beginPath();
-                ctx.moveTo(trail[0].x, trail[0].y);
-                for(let i = 1; i < trail.length; i++) {
-                    ctx.lineTo(trail[i].x, trail[i].y);
+                ctx.moveTo(drawnPath[0].x, drawnPath[0].y);
+                for(let i = 1; i < drawnPath.length; i++) {
+                    ctx.lineTo(drawnPath[i].x, drawnPath[i].y);
                 }
                 ctx.stroke();
             }
@@ -319,19 +334,15 @@
 
         function resetCursor() {
             if (isRepeating) return;
-            // Recenter the view on the current pose. Heading still comes from odom
-            // unless teaching owns the cursor.
+            // Recenter the view. The marker heading still comes from odom.
             const pose = estimatedOdom();
-            if (!isRecording && pose) {
+            if (pose) {
                 odomView.x = pose.x;
                 odomView.y = pose.y;
             }
             robotPos.x = startPoint.x;
             robotPos.y = startPoint.y;
-            if (isRecording || !pose) robotPos.angle = startPoint.angle;
-            if(isRecording) {
-                trail.push({ x: robotPos.x, y: robotPos.y });
-            }
+            if (!pose) robotPos.angle = startPoint.angle;
         }
 
         function wrapPi(delta) {
@@ -352,6 +363,17 @@
                 }
             }
             odomSample = { x: odom.x, y: odom.y, theta: odom.theta, t: now };
+            if (isRecording && odomPath.length) {
+                const last = odomPath[odomPath.length - 1];
+                const moved = Math.hypot(odom.x - last.x, odom.y - last.y);
+                const turned = Math.abs(wrapPi(odom.theta - last.theta));
+                if (moved > 0.0015 || turned > 0.03) {
+                    odomPath.push({
+                        t: Math.round(performance.now() - teachT0),
+                        x: odom.x, y: odom.y, theta: odom.theta
+                    });
+                }
+            }
             followOdom();
         }
 
@@ -378,8 +400,7 @@
         }
 
         function followOdom() {
-            // Teaching and mission playback still own the canvas cursor.
-            if (isRecording || isRepeating) return;
+            // Teaching records this pose. It does not drive the marker itself.
             const pose = estimatedOdom();
             if (!pose) return;
             const target = odomToCanvas(pose);
@@ -420,9 +441,14 @@
 
         function sendCmd(command) {
             if (command === 'SAVE_MAP') {
+                syncTrail();
                 const mapDataPayload = {
-                    stations: stations, 
+                    stations: stations,
                     trail: trail,
+                    driveLog: driveLog,
+                    odomPath: odomPath,
+                    teachOrigin: teachOrigin,
+                    odomView: odomView,
                     robotPos: robotPos,
                     startPoint: startPoint
                 };
@@ -457,6 +483,10 @@
                 .then(data => {
                     stations = data.stations || [];
                     trail = data.trail || [];
+                    driveLog = data.driveLog || [];
+                    odomPath = data.odomPath || [];
+                    teachOrigin = data.teachOrigin || null;
+                    if (data.odomView) odomView = data.odomView;
                     if(data.startPoint) startPoint = data.startPoint;
                     if(data.robotPos) robotPos = data.robotPos;
                     updateStationList();
@@ -465,79 +495,156 @@
                 .catch(err => alert("⚠️ READ FAILURE: " + err.message));
         }
 
+        function syncTrail() {
+            trail = odomPath.map(function (p) {
+                const c = odomToCanvas(p);
+                return { x: c.x, y: c.y };
+            });
+        }
+
+        function noteTaughtDrive(left, right) {
+            if (!isRecording) return;
+            const sig = left + ':' + right;
+            if (sig === lastTeachCmd) return;
+            lastTeachCmd = sig;
+            driveLog.push({
+                t: Math.round(performance.now() - teachT0),
+                left: left,
+                right: right
+            });
+        }
+
+        function commandAt(elapsed) {
+            let cmd = { t: 0, left: 0, right: 0 };
+            for (let i = 0; i < driveLog.length; i++) {
+                if (driveLog[i].t <= elapsed) cmd = driveLog[i];
+                else break;
+            }
+            return cmd;
+        }
+
+        function waypointAt(elapsed) {
+            if (!odomPath.length) return null;
+            let prev = odomPath[0];
+            for (let i = 0; i < odomPath.length; i++) {
+                const point = odomPath[i];
+                if (point.t >= elapsed) {
+                    if (point.t === prev.t) return point;
+                    const u = (elapsed - prev.t) / (point.t - prev.t);
+                    return {
+                        x: prev.x + (point.x - prev.x) * u,
+                        y: prev.y + (point.y - prev.y) * u,
+                        theta: prev.theta + wrapPi(point.theta - prev.theta) * u
+                    };
+                }
+                prev = point;
+            }
+            return prev;
+        }
+
+        // Timed command, plus a small nudge toward the recorded shape.
+        // Gains are tunes, not measurements. The shape is measured from the
+        // pose where replay started, so it repeats from wherever the robot is.
+        function correctedDrive(elapsed, left, right) {
+            if (left === 0 && right === 0) return { left: 0, right: 0 };
+            const pose = estimatedOdom();
+            const wp = waypointAt(elapsed);
+            if (!pose || !wp || !teachOrigin || !replayOrigin) return { left: left, right: right };
+            const dx = wp.x - teachOrigin.x;
+            const dy = wp.y - teachOrigin.y;
+            const ct = Math.cos(teachOrigin.theta);
+            const st = Math.sin(teachOrigin.theta);
+            const forward = dx * ct + dy * st;
+            const lateral = -dx * st + dy * ct;
+            const cr = Math.cos(replayOrigin.theta);
+            const sr = Math.sin(replayOrigin.theta);
+            const goalX = replayOrigin.x + forward * cr - lateral * sr;
+            const goalY = replayOrigin.y + forward * sr + lateral * cr;
+            const goalTheta = replayOrigin.theta + wrapPi(wp.theta - teachOrigin.theta);
+            const headingErr = wrapPi(goalTheta - pose.theta);
+            const ex = goalX - pose.x;
+            const ey = goalY - pose.y;
+            const c = Math.cos(pose.theta);
+            const s = Math.sin(pose.theta);
+            const forwardErr = ex * c + ey * s;
+            const spin = Math.max(-40, Math.min(40, headingErr * 60));
+            const surge = Math.max(-40, Math.min(40, forwardErr * 400));
+            return {
+                left: Math.max(-255, Math.min(255, Math.round(left + surge - spin))),
+                right: Math.max(-255, Math.min(255, Math.round(right + surge + spin)))
+            };
+        }
+
+        function stationUnderMarker() {
+            for (let i = 0; i < stations.length; i++) {
+                const st = stations[i];
+                if (st.triggered) continue;
+                if (Math.hypot(robotPos.x - st.x, robotPos.y - st.y) < 6) return st;
+            }
+            return null;
+        }
+
         function repeatMission() {
-            if (trail.length === 0) {
+            const moved = driveLog.some(function (ev) { return ev.left !== 0 || ev.right !== 0; });
+            if (!moved) {
                 alert("❌ REPEAT REJECTION: Load or record a path trace profile first!");
                 return;
             }
             if (isRepeating || isRecording) return;
-            
+
             isRepeating = true;
-            let currentStep = 0;
+            held.up = held.down = held.left = held.right = false;
+            const pose = estimatedOdom();
+            replayOrigin = pose ? { x: pose.x, y: pose.y, theta: pose.theta } : { x: 0, y: 0, theta: 0 };
+            if (!teachOrigin && odomPath.length) teachOrigin = odomPath[0];
+            playT0 = performance.now();
+            pauseUntil = 0;
+            stations.forEach(function (st) { st.triggered = false; });
+            playbackTick();
+        }
 
-            function runPlaybackStep() {
-                if (!isRepeating) return;
-                
-                if (currentStep >= trail.length) {
-                    isRepeating = false;
-                    // Alert is modal and would hold the last DRIVE until dismissed.
-                    // Wait until the stop request has been sent.
-                    postDrive(0, 0).then(function () {
-                        alert("🔁 MISSION EXECUTION COMPLETED!");
-                    });
-                    return;
-                }
-
-                let targetNode = trail[currentStep];
-                if (currentStep > 0) {
-                    let prevNode = trail[currentStep - 1];
-                    robotPos.angle = Math.atan2(targetNode.y - prevNode.y, targetNode.x - prevNode.x);
-                }
-                
-                robotPos.x = targetNode.x;
-                robotPos.y = targetNode.y;
-
-                let dynamicDelay = 50; 
-                let stationHaltTriggered = false;
-                let activeStationName = "";
-                let activeStationDuration = 0;
-
-                stations.forEach(st => {
-                    let distance = Math.hypot(robotPos.x - st.x, robotPos.y - st.y);
-                    if (distance < 6 && !st.triggered) {
-                        st.triggered = true;
-                        stationHaltTriggered = true;
-                        activeStationName = st.name;
-                        activeStationDuration = parseInt(st.duration) || 5; 
-                    }
-                });
-
-                currentStep++;
-
-                if (!isRepeating) return;
-
-                if (stationHaltTriggered) {
-                    console.log(`[STATION HALT] Arrived at: ${activeStationName}. Halting mission for ${activeStationDuration}s.`);
-                    dynamicDelay = activeStationDuration * 1000;
-                    // Coast for the pause. The server watchdog is not a latch.
-                    postDrive(0, 0);
-                } else {
-                    // Screen heading vs forward. See playbackDrive.
-                    const cmd = playbackDrive(robotPos.angle);
-                    postDrive(cmd.left, cmd.right);
-                }
-
-                setTimeout(runPlaybackStep, dynamicDelay);
+        function playbackTick() {
+            if (!isRepeating) return;
+            const now = performance.now();
+            if (now < pauseUntil) {
+                postDrive(0, 0);
+                setTimeout(playbackTick, 100);
+                return;
             }
-            
-            stations.forEach(st => st.triggered = false);
-            runPlaybackStep();
+            const elapsed = now - playT0;
+            const last = driveLog[driveLog.length - 1];
+            if (elapsed >= last.t) {
+                isRepeating = false;
+                // Alert is modal and would hold the last DRIVE until dismissed.
+                postDrive(0, 0).then(function () {
+                    alert("🔁 MISSION EXECUTION COMPLETED!");
+                });
+                return;
+            }
+            const station = stationUnderMarker();
+            if (station) {
+                station.triggered = true;
+                const duration = parseInt(station.duration, 10) || 5;
+                console.log('[STATION HALT] Arrived at: ' + station.name + '. Halting mission for ' + duration + 's.');
+                pauseUntil = now + duration * 1000;
+                playT0 += duration * 1000;
+                postDrive(0, 0);
+                setTimeout(playbackTick, 100);
+                return;
+            }
+            const base = commandAt(elapsed);
+            const cmd = correctedDrive(elapsed, base.left, base.right);
+            postDrive(cmd.left, cmd.right);
+            setTimeout(playbackTick, 100);
         }
 
         function clearTrail() {
             if (isRepeating) return;
             if (confirm("⚠️ CLEAR PATH DATA? This will erase the current green vector trace array from your view.")) {
                 trail = [];
+                driveLog = [];
+                odomPath = [];
+                teachOrigin = null;
             }
         }
 
@@ -571,31 +678,47 @@
 
         function toggleRec() {
             if (isRepeating) return;
-            isRecording = !isRecording;
             const btn = document.getElementById('rec-btn');
-            if(isRecording) {
+            if (!isRecording) {
+                isRecording = true;
+                driveLog = [];
+                odomPath = [];
+                trail = [];
+                teachT0 = performance.now();
+                lastTeachCmd = null;
+                const pose = estimatedOdom() || { x: 0, y: 0, theta: 0 };
+                teachOrigin = { x: pose.x, y: pose.y, theta: pose.theta };
+                odomPath.push({ t: 0, x: pose.x, y: pose.y, theta: pose.theta });
                 btn.innerText = "⏹ STOP TEACHING";
                 btn.classList.add('btn-active');
-                trail = [{ x: robotPos.x, y: robotPos.y }];
-            } else {
-                btn.innerText = "🔴 START TEACHING";
-                btn.classList.remove('btn-active');
+                if (anyHeld()) {
+                    const cmd = wheelsFromHeld();
+                    noteTaughtDrive(cmd.left, cmd.right);
+                }
+                return;
             }
-        }
-
-        // Screen-up (angle -π/2) is treated as robot forward. Confirm on the bench.
-        // The 0.5 rad spin threshold is a tune, not a measurement. Positive canvas
-        // error is clockwise, which is a right spin (left wheel forward).
-        function playbackDrive(angle) {
-            const forward = -Math.PI / 2;
-            let err = angle - forward;
-            while (err > Math.PI) err -= 2 * Math.PI;
-            while (err < -Math.PI) err += 2 * Math.PI;
-            if (Math.abs(err) > 0.5) {
-                if (err > 0) return { left: DRIVE_PWM, right: -DRIVE_PWM };
-                return { left: -DRIVE_PWM, right: DRIVE_PWM };
+            isRecording = false;
+            const last = driveLog[driveLog.length - 1];
+            if (last && (last.left !== 0 || last.right !== 0)) {
+                driveLog.push({
+                    t: Math.round(performance.now() - teachT0),
+                    left: 0,
+                    right: 0
+                });
             }
-            return { left: DRIVE_PWM, right: DRIVE_PWM };
+            const pose = estimatedOdom();
+            if (pose && odomPath.length) {
+                odomPath.push({
+                    t: Math.round(performance.now() - teachT0),
+                    x: pose.x, y: pose.y, theta: pose.theta
+                });
+            }
+            syncTrail();
+            held.up = held.down = held.left = held.right = false;
+            lastTeachCmd = null;
+            postDrive(0, 0);
+            btn.innerText = "🔴 START TEACHING";
+            btn.classList.remove('btn-active');
         }
 
         function wheelsFromHeld() {
@@ -618,7 +741,10 @@
             return fetch('/api/cmd?action=DRIVE&left=' + left + '&right=' + right, { method: 'POST' })
                 .then(res => res.json().then(data => ({ status: res.status, data: data })))
                 .then(result => {
-                    if (result.status === 409 || (result.data && result.data.estop_latched)) markEstop(true);
+                    if (result.status === 409 || (result.data && result.data.estop_latched)) {
+                        markEstop(true);
+                        isRepeating = false;
+                    }
                 })
                 .catch(() => {});
         }
@@ -627,14 +753,20 @@
         function refreshDrive() {
             if (isRepeating || !anyHeld()) return;
             const cmd = wheelsFromHeld();
+            noteTaughtDrive(cmd.left, cmd.right);
             postDrive(cmd.left, cmd.right);
         }
 
         function setHeld(dir, down) {
+            if (isRepeating) return;
             if (!Object.prototype.hasOwnProperty.call(held, dir)) return;
             held[dir] = down;
-            if (!anyHeld()) postDrive(0, 0);
-            else if (!isRepeating) refreshDrive();
+            if (!anyHeld()) {
+                noteTaughtDrive(0, 0);
+                postDrive(0, 0);
+            } else {
+                refreshDrive();
+            }
         }
 
         function haltMotion() {
@@ -643,6 +775,7 @@
             held.left = false;
             held.right = false;
             isRepeating = false;
+            noteTaughtDrive(0, 0);
             postDrive(0, 0);
         }
 
@@ -703,27 +836,7 @@
                 e.key === 'ArrowLeft' || e.key === 'ArrowRight';
             if (!driveKey) return;
             e.preventDefault();
-            // Teaching still draws the canvas path. Playback owns the wheels,
-            // so a held arrow does not also post DRIVE during a mission.
-            if (isRecording && !isRepeating) {
-                const moveSpeed = 4;
-                const turnSpeed = 0.15;
-                if (e.key === 'ArrowUp') {
-                    robotPos.x += Math.cos(robotPos.angle) * moveSpeed;
-                    robotPos.y += Math.sin(robotPos.angle) * moveSpeed;
-                    trail.push({ x: robotPos.x, y: robotPos.y });
-                } else if (e.key === 'ArrowDown') {
-                    robotPos.x -= Math.cos(robotPos.angle) * moveSpeed;
-                    robotPos.y -= Math.sin(robotPos.angle) * moveSpeed;
-                    trail.push({ x: robotPos.x, y: robotPos.y });
-                } else if (e.key === 'ArrowLeft') {
-                    robotPos.angle -= turnSpeed;
-                } else if (e.key === 'ArrowRight') {
-                    robotPos.angle += turnSpeed;
-                }
-                robotPos.x = Math.max(10, Math.min(canvas.width - 10, robotPos.x));
-                robotPos.y = Math.max(10, Math.min(canvas.height - 10, robotPos.y));
-            }
+            // Playback owns the wheels. Teaching only records the same drive.
             if (isRepeating) return;
             if (e.key === 'ArrowUp') setHeld('up', true);
             else if (e.key === 'ArrowDown') setHeld('down', true);

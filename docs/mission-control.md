@@ -16,7 +16,7 @@ Every path below is relative, so the browser sends it to the host that served th
 | `POST /api/cmd?action=ESTOP` | Emergency-stop button. Latches on the server until RESET. |
 | `POST /api/cmd?action=RESET` | RESET ESTOP button. Clears the latch. No serial line. |
 | `POST /api/cmd?action=DRIVE&left=<n>&right=<n>` | Arrow keys, the on-screen pad, and mission playback. Repeated about every 150 ms while a control is held. `0 0` on release, blur, and page hide. |
-| `POST /api/save_map` | Save-map button. JSON body with `stations`, `trail`, `robotPos`, and `startPoint`. The page treats `status` equal to `success` as a completed save. |
+| `POST /api/save_map` | Save-map button. JSON body with `stations`, `trail`, `driveLog`, `odomPath`, `robotPos`, and `startPoint`. The page treats `status` equal to `success` as a completed save. |
 | `GET /api/read_map` | Read-saved-map button. Expects JSON with those same fields. The alert text names `ROBZONE_MAP.JSON`. |
 | `POST /api/poweroff` | Shutdown button, after a confirm dialog. JSON fields read: `status`, `message`. |
 
@@ -24,9 +24,11 @@ Every path below is relative, so the browser sends it to the host that served th
 
 ## What the page keeps in the browser
 
-Outside teaching and mission playback, the canvas arrow follows `odom` from `GET /api/data` (server pose from encoder ticks, including mock ticks). Polls are about 5 times a second, and the marker eases between samples. `PX_PER_M` in the page is a view scale, not a measured map. RESET CURSOR recenters that view. Teaching still draws the canvas path from the arrow keys. The same keys also post `DRIVE` unless a mission is playing. Held PWM is `DRIVE_PWM` (80), a bench duty in the page script, not a measured speed. Forward is both wheels positive, back is both negative, left is left-negative/right-positive, right is the opposite.
+The canvas arrow always follows `odom` from `GET /api/data` (server pose from encoder ticks, including mock ticks), including while teaching and while a mission plays. Polls are about 5 times a second, and the marker eases between samples. `PX_PER_M` in the page is a view scale, not a measured map. RESET CURSOR recenters that view.
 
-Mission playback still walks the canvas trace. It also posts `DRIVE`. Screen-up (heading `-π/2`) is treated as robot forward. If the heading is more than 0.5 rad off that, the page spins in place. Both of those choices need a check on the floor. A station pause posts `DRIVE 0 0` for the pause.
+START TEACHING records the drive that moves the robot. Arrow keys and the pad still post `DRIVE` (PWM `DRIVE_PWM` 80, a bench duty, not a measured speed). Each change of wheel command is stored with a timestamp in `driveLog`, and the pose samples are stored in `odomPath`. STOP TEACHING closes that recording with a stop and keeps it. The green line is `odomPath`. CLEAR PATH TRACE drops both.
+
+REPEAT MISSION replays `driveLog` from the current pose and sends a stop at the end. A light correction nudges the wheels toward the recorded shape. Those gains are tunes, not measurements. ESTOP aborts the replay and latches. A station the marker passes still pauses the timeline and posts `DRIVE 0 0` for that station's duration. SAVE MAP writes `driveLog` and `odomPath` along with the canvas `trail`.
 
 A station type of `PHYSICAL (ESP32 Node)` stores an IP address. The form's default value is `10.42.0.50`. The station list displays it, and a map save includes it in the JSON. The script never sends a request to that address.
 

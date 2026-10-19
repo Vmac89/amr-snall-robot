@@ -113,7 +113,7 @@ The software path for teleop, battery sense, Kinect distance, odometry, and a RO
 
 ## Mission control
 
-`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page. Arrow keys, the on-screen pad, and mission playback post `DRIVE`. The canvas arrow follows encoder pose from `/api/data` while you drive. The CM4 server that implements its routes is `cm4/server`.
+`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page. Arrow keys, the on-screen pad, and mission playback post `DRIVE`. The canvas arrow follows encoder pose from `/api/data` while you drive, including during teaching. Teaching records that motion, and repeat mission replays the recorded wheel commands. The CM4 server that implements its routes is `cm4/server`.
 
 On the Pi, `bash cm4/install.sh` installs the apt packages (`python3-flask`, `python3-serial`, `python3-pil`) for `/usr/bin/python3` and installs the systemd unit. It does not create a virtualenv. After that, from `cm4/server`:
 
