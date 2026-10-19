@@ -118,6 +118,9 @@ class KinectFreenectNode : public rclcpp::Node {
       RCLCPP_ERROR(get_logger(), "freenect_init failed");
       return;
     }
+    // Camera only. Do not add freenect_set_tilt_degs: on this CM4,
+    // open_device followed by tilt segfaults. Tilt and LED are pyusb
+    // transfers to 045e:02b0 in cm4/server.
     freenect_select_subdevices(ctx, FREENECT_DEVICE_CAMERA);
     freenect_device * dev = nullptr;
     if (freenect_open_device(ctx, &dev, 0) < 0 || dev == nullptr) {

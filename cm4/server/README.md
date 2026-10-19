@@ -16,7 +16,7 @@ curl -X POST 'http://127.0.0.1:8080/api/cmd?action=RESET'
 
 If `dist` is a number below `AMR_OBSTACLE_CM` (placeholder 40), positive wheel commands are zeroed and reverse is still allowed. A missing distance does not block motion.
 
-`/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. Otherwise the stream repeats a placeholder image. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`. Each step changes a setpoint by 5 degrees, clamped to ±30 degrees because that is libfreenect's `TILT_MAX_DEGREES`. The setpoint is sent only when libfreenect exposes a tilt function and the call returns. The page logs "Tilt success" whenever the JSON parses; the `applied` field is the one that says whether a device was commanded. The Kinect is model `1414` (Xbox 360, Kinect v1). apt `libfreenect` 0.5.3 on Raspberry Pi OS Bookworm did not open it. The source build is in [docs/bring-up.md](../../docs/bring-up.md).
+`/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. If the camera raises, including `Failed to fetch const shift`, that failure is latched and the stream stays on the placeholder JPEG. libfreenect is not used for tilt: on this CM4, `freenect.open_device` followed by a tilt call segfaults. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`, which send a pyusb control transfer to the Kinect motor `045e:02b0`. Each step changes a setpoint by 5 degrees, clamped to ±30. `POST /api/led?value=1` sets the LED green (the code tested on this unit); other integer codes 0..255 are passed through, and a non-integer is HTTP 400. A missing motor still returns HTTP 200 with `applied` false. The page logs "Tilt success" whenever the tilt JSON parses; `applied` is the field that says whether USB succeeded. The Kinect is model `1414` (Xbox 360, Kinect v1). apt `libfreenect` 0.5.3 on Raspberry Pi OS Bookworm did not open it. The source build and the udev note are in [docs/bring-up.md](../../docs/bring-up.md).
 
 Map save/load uses a JSON file, `cm4/server/data/robzone_map.json` unless `AMR_MAP_PATH` is set. The page's alert text says `ROBZONE_MAP.JSON`; that string is in the HTML and is not the filename. `GET /api/read_map` is 404 until the first successful save, which is the page's "nothing saved yet" path.
 
@@ -28,7 +28,7 @@ Wheel diameter, track width, and ticks per revolution are placeholders. The serv
 
 ## Run without hardware
 
-`bash cm4/install.sh` (from a login user, not root) installs `python3-flask`, `python3-serial`, and `python3-pil` into the system interpreter and points systemd at `/usr/bin/python3`. It does not create `cm4/server/.venv`. On a machine where that script has been run, from this directory:
+`bash cm4/install.sh` (from a login user, not root) installs `python3-flask`, `python3-serial`, `python3-pil`, and `python3-usb` into the system interpreter and points systemd at `/usr/bin/python3`. It does not create `cm4/server/.venv`. On a machine where that script has been run, from this directory:
 
 ```bash
 python3 server.py --mock-serial --host 127.0.0.1 --port 8080

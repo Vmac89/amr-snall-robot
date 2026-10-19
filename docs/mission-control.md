@@ -50,8 +50,9 @@ The ESP32 line protocol is documented in [serial-protocol.md](serial-protocol.md
 | `GET /api/data` field `dist` | Centimetres from the Kinect depth center window when a frame exists, otherwise `n/a`. `dist_calibrated` is always false. |
 | `GET /api/data` field `odom` | Pose from encoder deltas. `calibrated` stays false until `AMR_GEOMETRY_CALIBRATED=1`. |
 | `GET /api/data` field `temp` | CM4 CPU thermal zone, in °C, when `/sys/class/thermal/thermal_zone0/temp` exists. `n/a` when it does not. Not an ESP32 reading. |
-| `GET /video_feed` | MJPEG. A libfreenect frame when that library returns one, otherwise a placeholder JPEG. |
-| `GET /tilt/up`, `GET /tilt/down` | Moves a tilt setpoint by 5 degrees, clamped to ±30 (libfreenect `TILT_MAX_DEGREES`). The call is forwarded only when libfreenect accepts it. `applied` is false when it does not. The page still logs "Tilt success" because it only prints `angle`. |
+| `GET /video_feed` | MJPEG. A libfreenect frame when that library returns one. A camera exception is latched and the stream stays on the placeholder JPEG. |
+| `GET /tilt/up`, `GET /tilt/down` | Moves the motor tilt setpoint by 5 degrees, clamped to −30..30. The command is a pyusb transfer to USB `045e:02b0`, not a libfreenect call. `applied` is false when the motor is missing or the transfer fails. The page still logs "Tilt success" because it only prints `angle`. |
+| `POST /api/led?value=<n>` | Kinect LED via the same pyusb motor. `n` must be an integer 0..255, else HTTP 400. Code `1` is green (tested on this unit). A missing motor returns 200 with `applied` false. The page does not call this route. |
 | `POST /api/save_map`, `GET /api/read_map` | A JSON file on the CM4. No serial traffic. `read_map` is HTTP 404 until a map has been saved, which is the page's empty-file path. |
 | `POST /api/poweroff` | `shutdown -h now` only when `AMR_ALLOW_POWEROFF=1` or `--allow-poweroff` is set. Default is off, and the route then returns HTTP 403 with `status: error`. |
 

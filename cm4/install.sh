@@ -16,7 +16,7 @@ UNIT_DST="/etc/systemd/system/amr-mission-control.service"
 
 echo "Repo: ${ROOT}"
 sudo apt-get update
-sudo apt-get install -y python3-flask python3-serial python3-pil
+sudo apt-get install -y python3-flask python3-serial python3-pil python3-usb
 
 # Kinect model 1414 (Xbox 360). apt libfreenect 0.5.3 on Raspberry Pi OS
 # Bookworm fails with "Failed to fetch zero plane info". Do not install it
@@ -61,8 +61,9 @@ the board from booting. On the carrier, confirm enable_uart=1 (and the
 overlay that matches this board) in /boot/firmware/config.txt or
 /boot/config.txt, then reboot.
 
-This script does not create a virtualenv. Flask, pyserial, and Pillow are
-the system packages, and the service runs /usr/bin/python3.
+This script does not create a virtualenv. Flask, pyserial, Pillow, and
+pyusb (python3-usb) are the system packages, and the service runs
+/usr/bin/python3.
 Do not look for ${ROOT}/cm4/server/.venv/bin/activate.
 
 Mock run, from the repo, with the system interpreter:

@@ -9,9 +9,11 @@ import unittest
 from pathlib import Path
 
 from depth_range import front_distance_cm, raw11_to_mm
+from kinect_motor import clamp_tilt
 from odometry import Odometry
 from safety import clamp_for_obstacle
 from server import Config, create_app
+from video_source import KinectSource
 
 
 class MissionControlServerTest(unittest.TestCase):
@@ -141,7 +143,7 @@ class MissionControlServerTest(unittest.TestCase):
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(self._data()["drive_left"], 0)
 
-    def test_tilt_setpoint_without_freenect(self) -> None:
+    def test_tilt_setpoint_without_motor(self) -> None:
         up = self.client.get("/tilt/up")
         self.assertEqual(up.status_code, 200)
         self.assertEqual(up.get_json()["angle"], 5)
@@ -150,8 +152,65 @@ class MissionControlServerTest(unittest.TestCase):
         self.assertEqual(again.get_json()["angle"], 10)
         down = self.client.get("/tilt/down")
         self.assertEqual(down.get_json()["angle"], 5)
+        self.assertEqual(self._data()["tilt_setpoint_deg"], 5)
         missing = self.client.get("/tilt/sideways")
         self.assertEqual(missing.status_code, 404)
+        self.assertFalse(hasattr(self.app.extensions["amr_kinect"], "nudge"))
+        led = self.client.post("/api/led?value=1")
+        self.assertEqual(led.status_code, 200)
+        self.assertFalse(led.get_json()["applied"])
+
+    def test_tilt_and_led_use_pyusb(self) -> None:
+        class FakeMotor:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def ctrl_transfer(self, bm_request_type, b_request, w_value, w_index, data):
+                self.calls.append((bm_request_type, b_request, w_value, w_index, data))
+
+        fake = FakeMotor()
+        motor = self.app.extensions["amr_motor"]
+        motor._finder = lambda: fake
+
+        up = self.client.get("/tilt/up")
+        self.assertEqual(up.status_code, 200)
+        self.assertEqual(up.get_json()["angle"], 5)
+        self.assertTrue(up.get_json()["applied"])
+        self.assertEqual(fake.calls[-1], (0x40, 0x31, 10, 0, b""))
+
+        for _ in range(7):
+            self.client.get("/tilt/up")
+        self.assertEqual(motor.angle, 30)
+        self.assertEqual(fake.calls[-1], (0x40, 0x31, 60, 0, b""))
+        self.assertEqual(self._data()["tilt_setpoint_deg"], 30)
+
+        motor.angle = 0
+        down = self.client.get("/tilt/down")
+        self.assertEqual(down.get_json()["angle"], -5)
+        self.assertTrue(down.get_json()["applied"])
+        self.assertEqual(fake.calls[-1], (0x40, 0x31, (-10) & 0xFFFF, 0, b""))
+
+        led = self.client.post("/api/led?value=1")
+        self.assertEqual(led.status_code, 200)
+        self.assertTrue(led.get_json()["applied"])
+        self.assertEqual(led.get_json()["led"], 1)
+        self.assertEqual(fake.calls[-1], (0x40, 0x06, 1, 0, b""))
+
+        sent = len(fake.calls)
+        bad = self.client.post("/api/led?value=green")
+        self.assertEqual(bad.status_code, 400)
+        self.assertFalse(bad.get_json()["applied"])
+        self.assertEqual(len(fake.calls), sent)
+
+        class Boom:
+            def ctrl_transfer(self, *args):
+                raise RuntimeError("usb error")
+
+        motor._finder = lambda: Boom()
+        failed = self.client.get("/tilt/up")
+        self.assertEqual(failed.status_code, 200)
+        self.assertFalse(failed.get_json()["applied"])
+        self.assertEqual(failed.get_json()["angle"], 0)
 
     def test_map_round_trip_and_missing_file(self) -> None:
         missing = self.client.get("/api/read_map")
@@ -269,6 +328,40 @@ class GeometryHelpersTest(unittest.TestCase):
         self.assertIsNotNone(mm)
         self.assertGreater(mm, 200)
         self.assertLess(mm, 8000)
+
+    def test_tilt_clamp(self) -> None:
+        self.assertEqual(clamp_tilt(30), 30)
+        self.assertEqual(clamp_tilt(31), 30)
+        self.assertEqual(clamp_tilt(-30), -30)
+        self.assertEqual(clamp_tilt(-40.2), -30)
+        self.assertEqual((-60) & 0xFFFF, 65476)
+
+    def test_camera_failure_latches_placeholder(self) -> None:
+        calls = {"n": 0}
+
+        class Boom:
+            def sync_get_video(self):
+                calls["n"] += 1
+                raise RuntimeError("Failed to fetch const shift")
+
+            def sync_get_depth(self, format=None):
+                calls["n"] += 1
+                raise RuntimeError("Failed to fetch const shift")
+
+        src = KinectSource()
+        src._freenect = Boom()
+        self.assertIsNone(src._capture_once())
+        self.assertTrue(src._camera_failed)
+        self.assertEqual(src.detail, "Failed to fetch const shift")
+        self.assertIsNone(src.distance_cm)
+        self.assertEqual(src.jpeg(), src._placeholder)
+        self.assertTrue(src.jpeg().startswith(b"\xff\xd8"))
+        src._kick_capture()
+        src._update_distance()
+        self.assertEqual(calls["n"], 1)
+        self.assertFalse(src.live)
+        self.assertFalse(hasattr(src, "nudge"))
+        self.assertFalse(hasattr(src, "_apply_tilt"))
 
 
 if __name__ == "__main__":

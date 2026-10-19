@@ -29,6 +29,7 @@ from calibration import (
     TRACK_WIDTH_M,
     WHEEL_DIAMETER_M,
 )
+from kinect_motor import KinectMotor
 from odometry import Odometry
 from safety import EstopLatched, Safety
 from serial_bridge import WHEEL_MAX, WHEEL_MIN, MockEsp32, SerialBridge, SerialPort
@@ -166,6 +167,7 @@ def create_app(config: Config) -> Flask:
             mock=False,
         )
     kinect = KinectSource()
+    motor = KinectMotor()
     safety = Safety(
         watchdog_s=config.watchdog_s,
         obstacle_cm=config.obstacle_cm,
@@ -192,6 +194,7 @@ def create_app(config: Config) -> Flask:
     odom_thread.start()
     app.extensions["amr_bridge"] = bridge
     app.extensions["amr_kinect"] = kinect
+    app.extensions["amr_motor"] = motor
     app.extensions["amr_config"] = config
     app.extensions["amr_safety"] = safety
     app.extensions["amr_odom"] = odom
@@ -241,7 +244,7 @@ def create_app(config: Config) -> Flask:
         body["dist_note"] = kinect.distance_note
         body["dist_calibrated"] = False
         body["kinect_live"] = kinect.live
-        body["tilt_setpoint_deg"] = kinect.angle
+        body["tilt_setpoint_deg"] = motor.angle
         body["estop_latched"] = safety.latched
         body["safety"] = safety.snapshot()
         body["odom"] = odom.snapshot()
@@ -251,7 +254,32 @@ def create_app(config: Config) -> Flask:
     def tilt(direction: str):
         if direction not in ("up", "down"):
             return jsonify(status="error", message="unknown tilt direction"), 404
-        return jsonify(kinect.nudge(direction))
+        return jsonify(motor.nudge(direction))
+
+    @app.post("/api/led")
+    def api_led():
+        raw = request.args.get("value", "")
+        try:
+            code = int(raw, 10)
+        except ValueError:
+            return (
+                jsonify(
+                    status="error",
+                    message="LED value must be an integer 0..255",
+                    applied=False,
+                ),
+                400,
+            )
+        if code < 0 or code > 255:
+            return (
+                jsonify(
+                    status="error",
+                    message="LED value must be an integer 0..255",
+                    applied=False,
+                ),
+                400,
+            )
+        return jsonify(motor.set_led(code))
 
     @app.post("/api/cmd")
     def api_cmd():

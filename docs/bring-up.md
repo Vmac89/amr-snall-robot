@@ -51,7 +51,7 @@ This robot's host is a Waveshare CM4-Duino running Raspberry Pi OS Lite (Bookwor
 bash cm4/install.sh
 ```
 
-The script installs `python3-flask`, `python3-serial`, and `python3-pil` for `/usr/bin/python3`, adds your user to `dialout`, and installs the systemd unit with your user and this repo path. It does not create a Python virtualenv, so `cm4/server/.venv/bin/activate` will not exist afterwards. Run the server with `python3 server.py` from `cm4/server`, or with the systemd unit. A venv is a separate option, documented in `cm4/server/README.md`, for a machine that does not use those apt packages. The script does not set `AMR_ALLOW_POWEROFF`. It does not edit the boot config. Confirm `enable_uart=1` yourself, then reboot so the group and the UART come up.
+The script installs `python3-flask`, `python3-serial`, `python3-pil`, and `python3-usb` for `/usr/bin/python3`, adds your user to `dialout`, and installs the systemd unit with your user and this repo path. It does not create a Python virtualenv, so `cm4/server/.venv/bin/activate` will not exist afterwards. Run the server with `python3 server.py` from `cm4/server`, or with the systemd unit. A venv is a separate option, documented in `cm4/server/README.md`, for a machine that does not use those apt packages. The script does not set `AMR_ALLOW_POWEROFF`. It does not edit the boot config. Confirm `enable_uart=1` yourself, then reboot so the group and the UART come up.
 
 Edit `AMR_SERIAL_PORT` in the unit if the carrier is not `/dev/ttyAMA0`. Restart:
 
@@ -101,11 +101,15 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
+`51-kinect.rules` allows non-root access to the Kinect motor, USB `045e:02b0`. That is the device Mission Control tilts. The camera is a different USB product and is the only part that uses libfreenect.
+
+Tilt and the LED do not go through libfreenect. On this CM4 the camera fails in libfreenect with `Failed to fetch const shift`, and `freenect.open_device` followed by a tilt call segfaults. `cm4/server` keeps libfreenect for video only. `python3-usb` (installed by `cm4/install.sh`) sends the motor transfers that were tested on this unit: tilt is `ctrl_transfer(0x40, 0x31, (deg * 2) & 0xFFFF, 0, b'')` with `deg` clamped to −30..30, and the LED is `ctrl_transfer(0x40, 0x06, led, 0, b'')` where `1` is green. The page's tilt buttons call `GET /tilt/up` and `GET /tilt/down`. `POST /api/led?value=1` sets that green LED; the page does not call it. If the camera raises, the process stays up, it does not call freenect tilt, and `/video_feed` keeps serving the placeholder JPEG. `applied` on the tilt JSON is false when the motor is missing or the transfer fails. The page still logs "Tilt success" because it only prints `angle`.
+
 USB autosuspend has to be off or the Kinect drops off the bus. A setting that stays across reboot is `usbcore.autosuspend=-1` at the end of the single line in `/boot/firmware/cmdline.txt`. Reboot after editing that file.
 
 `otg_mode=1` under the `[cm4]` section of `/boot/firmware/config.txt` is the USB-host line tried on this Waveshare CM4-Duino. It is still being verified. This repo does not write that file. A wrong boot overlay can keep the board from booting, so confirm the line before relying on it, and do not treat a missing camera as a finished library build until that check is done.
 
-With the source-built libfreenect importing and the device enumerating, `/api/data` field `dist` becomes centimetres from the center of the depth frame, and `kinect_live` can become true. `dist_calibrated` stays false. Check a few known gaps with a tape before trusting `dist`. If the camera does not face forward, the center window is the wrong obstacle.
+With the source-built libfreenect importing and the camera returning a frame, `/api/data` field `dist` becomes centimetres from the center of the depth frame, and `kinect_live` can become true. `dist_calibrated` stays false. Check a few known gaps with a tape before trusting `dist`. If the camera does not face forward, the center window is the wrong obstacle. The `Failed to fetch const shift` failure leaves `dist` at `n/a` and the video on the placeholder; tilt still uses the motor.
 
 `AMR_OBSTACLE_CM` defaults to `40` (CALIBRATE). When `dist` is a number below that threshold, forward wheel commands are forced to zero and reverse is still allowed. A missing distance does not block motion. Set `AMR_OBSTACLE_CALIBRATED=1` only after the tape check. The flag is reported; it does not by itself change the threshold.
 

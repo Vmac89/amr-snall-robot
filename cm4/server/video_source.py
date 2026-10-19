@@ -1,9 +1,10 @@
 """Kinect MJPEG source with a drawn placeholder when libfreenect is absent.
 
-Model 1414 is the Xbox 360 Kinect. libfreenect is the matching library.
-The Bookworm apt package 0.5.3 did not open it; see docs/bring-up.md. Tilt uses
-libfreenect's own limit (TILT_MAX_DEGREES, 30) only when that library accepts
-the call. The angle reported to the page is the commanded setpoint.
+Model 1414 is the Xbox 360 Kinect. libfreenect is used for video and depth
+only. Tilt and the LED are pyusb transfers in kinect_motor.py. On this CM4,
+freenect.open_device followed by a tilt call segfaults, so this module never
+calls a freenect tilt function. A camera exception (including "Failed to
+fetch const shift") is latched: later grabs stay on the placeholder JPEG.
 """
 
 from __future__ import annotations
@@ -15,10 +16,6 @@ import threading
 from depth_range import front_distance_cm
 
 logger = logging.getLogger("amr.cm4.video")
-
-# libfreenect include/libfreenect.h: #define TILT_MAX_DEGREES 30
-TILT_LIMIT_DEG = 30.0
-TILT_STEP_DEG = 5.0
 
 
 def _placeholder_jpeg() -> bytes:
@@ -55,7 +52,6 @@ def _tiny_jpeg() -> bytes:
 
 class KinectSource:
     def __init__(self) -> None:
-        self.angle = 0.0
         self.live = False
         self.detail = "not started"
         self.distance_cm: float | None = None
@@ -64,8 +60,8 @@ class KinectSource:
         self._placeholder = self._latest
         self._freenect = None
         self._import_error: str | None = None
+        self._camera_failed = False
         self._capture: threading.Thread | None = None
-        self._tilt: threading.Thread | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="kinect", daemon=True)
 
@@ -79,12 +75,6 @@ class KinectSource:
 
     def jpeg(self) -> bytes:
         return self._latest
-
-    def nudge(self, direction: str) -> dict:
-        delta = TILT_STEP_DEG if direction == "up" else -TILT_STEP_DEG
-        self.angle = max(-TILT_LIMIT_DEG, min(TILT_LIMIT_DEG, self.angle + delta))
-        applied, detail = self._apply_tilt(self.angle)
-        return {"angle": self.angle, "applied": applied, "detail": detail}
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -107,7 +97,20 @@ class KinectSource:
         self._freenect = freenect
         return freenect
 
+    def _fail_camera(self, exc: BaseException) -> None:
+        self._camera_failed = True
+        self.live = False
+        self.detail = str(exc)
+        self.distance_cm = None
+        self.distance_note = str(exc)
+        self._latest = self._placeholder
+        logger.info("libfreenect camera failed; staying on the placeholder: %s", exc)
+
     def _kick_capture(self) -> None:
+        if self._camera_failed:
+            self.live = False
+            self._latest = self._placeholder
+            return
         if self._load() is None:
             self._latest = self._placeholder
             return
@@ -116,8 +119,12 @@ class KinectSource:
 
         def worker() -> None:
             frame = self._capture_once()
+            if self._camera_failed:
+                self.live = False
+                self._latest = self._placeholder
+                return
             self._update_distance()
-            if frame is None:
+            if self._camera_failed or frame is None:
                 self.live = False
                 self._latest = self._placeholder
                 return
@@ -129,14 +136,15 @@ class KinectSource:
         self._capture.start()
 
     def _capture_once(self) -> bytes | None:
+        if self._camera_failed:
+            return None
         freenect = self._freenect
         if freenect is None:
             return None
         try:
             got = freenect.sync_get_video()
         except Exception as exc:
-            self.detail = str(exc)
-            logger.info("libfreenect video failed: %s", exc)
+            self._fail_camera(exc)
             return None
         if not got:
             self.detail = "libfreenect returned no frame"
@@ -157,6 +165,8 @@ class KinectSource:
         return buf.getvalue()
 
     def _update_distance(self) -> None:
+        if self._camera_failed:
+            return
         freenect = self._freenect
         if freenect is None:
             self.distance_cm = None
@@ -171,8 +181,7 @@ class KinectSource:
                 got = freenect.sync_get_depth(format=mm_format)
                 mode = "mm"
         except Exception as exc:
-            self.distance_cm = None
-            self.distance_note = str(exc)
+            self._fail_camera(exc)
             return
         if not got:
             self.distance_cm = None
@@ -181,34 +190,3 @@ class KinectSource:
         cm, note = front_distance_cm(got[0], mode)
         self.distance_cm = cm
         self.distance_note = note
-
-    def _apply_tilt(self, angle: float) -> tuple[bool, str]:
-        freenect = self._load()
-        if freenect is None:
-            return False, self.detail
-        if self._tilt is not None and self._tilt.is_alive():
-            return False, "previous tilt call has not returned"
-        outcome: dict = {}
-
-        def worker() -> None:
-            fn = getattr(freenect, "sync_set_tilt_degs", None) or getattr(
-                freenect, "set_tilt_degs", None
-            )
-            if fn is None:
-                outcome["error"] = "libfreenect has no tilt function"
-                return
-            try:
-                fn(angle)
-            except Exception as exc:
-                outcome["error"] = str(exc)
-                return
-            outcome["ok"] = True
-
-        self._tilt = threading.Thread(target=worker, name="kinect-tilt", daemon=True)
-        self._tilt.start()
-        self._tilt.join(1.0)
-        if self._tilt.is_alive():
-            return False, "tilt call timed out"
-        if outcome.get("ok"):
-            return True, "sent to libfreenect"
-        return False, str(outcome.get("error", "tilt was not applied"))
