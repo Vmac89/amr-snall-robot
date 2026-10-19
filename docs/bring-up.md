@@ -51,7 +51,7 @@ On the CM4, from a login user (not as root):
 bash cm4/install.sh
 ```
 
-The script installs `python3-flask`, `python3-serial`, and `python3-pil`, adds your user to `dialout`, and installs the systemd unit with your user and this repo path. It does not set `AMR_ALLOW_POWEROFF`. It does not edit the boot config. Confirm `enable_uart=1` yourself, then reboot so the group and the UART come up.
+The script installs `python3-flask`, `python3-serial`, and `python3-pil` for `/usr/bin/python3`, adds your user to `dialout`, and installs the systemd unit with your user and this repo path. It does not create a Python virtualenv, so `cm4/server/.venv/bin/activate` will not exist afterwards. Run the server with `python3 server.py` from `cm4/server`, or with the systemd unit. A venv is a separate option, documented in `cm4/server/README.md`, for a machine that does not use those apt packages. The script does not set `AMR_ALLOW_POWEROFF`. It does not edit the boot config. Confirm `enable_uart=1` yourself, then reboot so the group and the UART come up.
 
 Edit `AMR_SERIAL_PORT` in the unit if the carrier is not `/dev/ttyAMA0`. Restart:
 

@@ -28,7 +28,15 @@ Wheel diameter, track width, and ticks per revolution are placeholders. The serv
 
 ## Run without hardware
 
-From this directory, with the repo root two levels up:
+`bash cm4/install.sh` (from a login user, not root) installs `python3-flask`, `python3-serial`, and `python3-pil` into the system interpreter and points systemd at `/usr/bin/python3`. It does not create `cm4/server/.venv`. On a machine where that script has been run, from this directory:
+
+```bash
+python3 server.py --mock-serial --host 127.0.0.1 --port 8080
+```
+
+Open `http://127.0.0.1:8080/`.
+
+On a computer without those apt packages, use a venv instead. `install.sh` is not that path:
 
 ```bash
 python3 -m venv .venv
@@ -37,9 +45,7 @@ pip install -r requirements.txt
 python3 server.py --mock-serial --host 127.0.0.1 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/`.
-
-Raspberry Pi OS can use distro packages instead of the venv when they are present: `python3-flask`, `python3-serial`, and `python3-pil`. Optional Kinect support is the distro's `python3-freenect` (and its udev rules), not a pip requirement. Confirm those package names on the image you are using. If the import or the device open fails, the placeholder frame is what `/video_feed` serves.
+Optional Kinect support is the distro's `python3-freenect` (and its udev rules), not a pip requirement. Confirm those package names on the image you are using. If the import or the device open fails, the placeholder frame is what `/video_feed` serves.
 
 ```bash
 python3 -m unittest test_server.py

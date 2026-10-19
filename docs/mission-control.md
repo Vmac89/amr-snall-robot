@@ -24,7 +24,7 @@ Every path below is relative, so the browser sends it to the host that served th
 
 ## What the page keeps in the browser
 
-Teaching still draws the canvas path from the arrow keys. The same keys also post `DRIVE` unless a mission is playing. Held PWM is `DRIVE_PWM` (80), a bench duty in the page script, not a measured speed. Forward is both wheels positive, back is both negative, left is left-negative/right-positive, right is the opposite.
+Outside teaching and mission playback, the canvas arrow follows `odom` from `GET /api/data` (server pose from encoder ticks, including mock ticks). Polls are about 5 times a second, and the marker eases between samples. `PX_PER_M` in the page is a view scale, not a measured map. RESET CURSOR recenters that view. Teaching still draws the canvas path from the arrow keys. The same keys also post `DRIVE` unless a mission is playing. Held PWM is `DRIVE_PWM` (80), a bench duty in the page script, not a measured speed. Forward is both wheels positive, back is both negative, left is left-negative/right-positive, right is the opposite.
 
 Mission playback still walks the canvas trace. It also posts `DRIVE`. Screen-up (heading `-π/2`) is treated as robot forward. If the heading is more than 0.5 rad off that, the page spins in place. Both of those choices need a check on the floor. A station pause posts `DRIVE 0 0` for the pause.
 

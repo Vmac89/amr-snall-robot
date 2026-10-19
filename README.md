@@ -113,7 +113,15 @@ The software path for teleop, battery sense, Kinect distance, odometry, and a RO
 
 ## Mission control
 
-`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page. Arrow keys, the on-screen pad, and mission playback post `DRIVE`. The CM4 server that implements its routes is `cm4/server`. Install on the Pi with `bash cm4/install.sh` (see [docs/bring-up.md](docs/bring-up.md)). Without hardware:
+`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page. Arrow keys, the on-screen pad, and mission playback post `DRIVE`. The canvas arrow follows encoder pose from `/api/data` while you drive. The CM4 server that implements its routes is `cm4/server`.
+
+On the Pi, `bash cm4/install.sh` installs the apt packages (`python3-flask`, `python3-serial`, `python3-pil`) for `/usr/bin/python3` and installs the systemd unit. It does not create a virtualenv. After that, from `cm4/server`:
+
+```bash
+python3 server.py --mock-serial --host 127.0.0.1 --port 8080
+```
+
+A venv is only for a machine that does not have those apt packages:
 
 ```bash
 cd cm4/server
@@ -123,7 +131,7 @@ pip install -r requirements.txt
 python3 server.py --mock-serial --host 127.0.0.1 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/`.
+Open `http://127.0.0.1:8080/`. The checklist is [docs/bring-up.md](docs/bring-up.md).
 
 `ESTOP` is sent to the ESP32 as `STOP` and latches until `RESET`. Holding an arrow key or pad button repeats `DRIVE` (PWM 80, a bench duty). Releasing the key, blurring the window, or hiding the page sends a stop, and the server coasts if those posts stop. `/api/data` carries encoder ticks, `batt` from the firmware millivolt field (`batt_calibrated` false until you set it), `dist` from the Kinect when a depth frame exists (otherwise `n/a`), and `odom` from the placeholders. Shutdown stays disabled unless `AMR_ALLOW_POWEROFF=1`. Kinect video uses libfreenect when it returns a frame, and a placeholder JPEG otherwise.
 

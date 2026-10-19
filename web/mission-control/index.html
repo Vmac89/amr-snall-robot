@@ -230,6 +230,14 @@
         // Repeat faster than the server watchdog (CLIENT_WATCHDOG_S, 0.5 s).
         const DRIVE_REPEAT_MS = 150;
         const held = { up: false, down: false, left: false, right: false };
+        // Pixels per odom metre. A view scale so placeholder motion is visible
+        // on this canvas. Not a measured map. Lower it if a calibrated robot
+        // crosses the canvas too quickly.
+        const PX_PER_M = 1200;
+        // Odom sample that is drawn at startPoint. RESET CURSOR updates this.
+        let odomView = { x: 0, y: 0 };
+        let odomSample = null;
+        let odomVel = { x: 0, y: 0, theta: 0 };
 
         function init() {
             canvas.width = canvas.clientWidth;
@@ -250,7 +258,8 @@
             });
             bindDrivePad();
             
-            setInterval(fetchTelemetry, 1000);
+            // Faster than 1 s so the marker can follow odom between paints.
+            setInterval(fetchTelemetry, 200);
             setInterval(refreshDrive, DRIVE_REPEAT_MS);
             animateRobotSimulation();
         }
@@ -310,12 +319,76 @@
 
         function resetCursor() {
             if (isRepeating) return;
+            // Recenter the view on the current pose. Heading still comes from odom
+            // unless teaching owns the cursor.
+            const pose = estimatedOdom();
+            if (!isRecording && pose) {
+                odomView.x = pose.x;
+                odomView.y = pose.y;
+            }
             robotPos.x = startPoint.x;
             robotPos.y = startPoint.y;
-            robotPos.angle = startPoint.angle;
+            if (isRecording || !pose) robotPos.angle = startPoint.angle;
             if(isRecording) {
                 trail.push({ x: robotPos.x, y: robotPos.y });
             }
+        }
+
+        function wrapPi(delta) {
+            while (delta > Math.PI) delta -= 2 * Math.PI;
+            while (delta < -Math.PI) delta += 2 * Math.PI;
+            return delta;
+        }
+
+        function noteOdom(odom) {
+            if (!odom || typeof odom.x !== 'number' || typeof odom.y !== 'number') return;
+            const now = performance.now();
+            if (odomSample) {
+                const dt = (now - odomSample.t) / 1000;
+                if (dt > 0.02 && dt < 1.5) {
+                    odomVel.x = (odom.x - odomSample.x) / dt;
+                    odomVel.y = (odom.y - odomSample.y) / dt;
+                    odomVel.theta = wrapPi(odom.theta - odomSample.theta) / dt;
+                }
+            }
+            odomSample = { x: odom.x, y: odom.y, theta: odom.theta, t: now };
+            followOdom();
+        }
+
+        function estimatedOdom() {
+            if (!odomSample) return null;
+            // Short extrapolation covers the gap between /api/data polls.
+            const extrap = Math.min(0.3, (performance.now() - odomSample.t) / 1000);
+            return {
+                x: odomSample.x + odomVel.x * extrap,
+                y: odomSample.y + odomVel.y * extrap,
+                theta: odomSample.theta + odomVel.theta * extrap
+            };
+        }
+
+        // Odom +x at theta 0 is robot forward. The marker draws forward as screen-up.
+        function odomToCanvas(pose) {
+            const dx = pose.x - odomView.x;
+            const dy = pose.y - odomView.y;
+            return {
+                x: startPoint.x - dy * PX_PER_M,
+                y: startPoint.y - dx * PX_PER_M,
+                angle: -Math.PI / 2 - pose.theta
+            };
+        }
+
+        function followOdom() {
+            // Teaching and mission playback still own the canvas cursor.
+            if (isRecording || isRepeating) return;
+            const pose = estimatedOdom();
+            if (!pose) return;
+            const target = odomToCanvas(pose);
+            const gain = 0.45;
+            robotPos.x += (target.x - robotPos.x) * gain;
+            robotPos.y += (target.y - robotPos.y) * gain;
+            robotPos.angle += wrapPi(target.angle - robotPos.angle) * gain;
+            robotPos.x = Math.max(10, Math.min(canvas.width - 10, robotPos.x));
+            robotPos.y = Math.max(10, Math.min(canvas.height - 10, robotPos.y));
         }
 
         // Only a missing sample is "n/a". Numeric 0 must stay 0 (the old || fallback
@@ -333,6 +406,7 @@
                     document.getElementById('batt-val').innerText = metric(data.batt, 'n/a') + 'V';
                     document.getElementById('radar-val').innerText = metric(data.dist, 'n/a') + ' CM';
                     if (data.estop_latched) markEstop(true);
+                    if (data.odom) noteOdom(data.odom);
                 })
                 .catch(() => console.log("Telemetry link offline."));
         }
@@ -739,6 +813,7 @@
         }
 
         function animateRobotSimulation() {
+            followOdom();
             render();
             requestAnimationFrame(animateRobotSimulation);
         }

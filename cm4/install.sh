@@ -62,7 +62,14 @@ the board from booting. On the carrier, confirm enable_uart=1 (and the
 overlay that matches this board) in /boot/firmware/config.txt or
 /boot/config.txt, then reboot.
 
-Start now:
+This script does not create a virtualenv. Flask, pyserial, and Pillow are
+the system packages, and the service runs /usr/bin/python3.
+Do not look for ${ROOT}/cm4/server/.venv/bin/activate.
+
+Mock run, from the repo, with the system interpreter:
+  python3 ${ROOT}/cm4/server/server.py --mock-serial --host 0.0.0.0 --port 8080
+
+Start the service now:
   sudo systemctl restart amr-mission-control.service
 
 Bring-up checklist: ${ROOT}/docs/bring-up.md
