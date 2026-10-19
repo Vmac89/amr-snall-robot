@@ -23,7 +23,7 @@ READY
 | `PING` | `PONG` | Heartbeat only. |
 | `STOP` | `OK` | Coast both motors (enable PWM 0, both direction inputs low). |
 | `DRIVE <left> <right>` | `OK` | Wheel commands, integers from `-255` to `255`. Positive is the firmware direction; swap motor leads if the wheel turns the wrong way. |
-| `ENC` | `ENC <left_ticks> <right_ticks>` | Signed cumulative quadrature counts. |
+| `ENC` | `ENC <left_ticks> <right_ticks> <battery_mv>` | Signed cumulative quadrature counts, then battery millivolts. A two-field line is still accepted by the CM4 server. |
 | `TELEM <0\|1>` | `OK` | `1` prints an `ENC` line on that port every 100 ms. `0` stops it. |
 
 Every well-formed command refreshes the motion heartbeat, including `ENC` and `PING`. Telemetry lines the firmware prints do not count as a heartbeat. While a non-zero `DRIVE` is active, some valid command must arrive at least every 500 ms (`kCommandTimeoutMs` in `firmware/esp32/include/config.h`). When the window expires the firmware coasts the motors and prints this unsolicited line on both ports:
@@ -53,15 +53,17 @@ PONG
 DRIVE 80 -40
 OK
 ENC
-ENC 0 0
+ENC 0 0 0
 TELEM 1
 OK
-ENC 12 -3
+ENC 12 -3 3300
 TELEM 0
 OK
 STOP
 OK
 ```
+
+`battery_mv` is `analogReadMilliVolts` on the proposed battery pin times `kBatteryDividerRatio`. The ratio ships as `1.0`, so the field is pin millivolts until that constant is set to the divider you fitted. GPIO 4 is the proposed pin. Do not wire the pack to it directly. Details are in [bring-up.md](bring-up.md).
 
 Tick sign follows the quadrature decode in `firmware/esp32/src/encoders.cpp`. Which mechanical direction increments a count is unset until the encoder wiring is checked. One encoder channel swapped with the other flips the sign.
 
@@ -69,4 +71,4 @@ Wheel mixing from `cmd_vel` is intentionally not in this protocol. The CM4 sends
 
 ## Mission control page
 
-The dashboard in `web/mission-control/index.html` speaks same-origin HTTP. It does not write these serial lines itself. `cm4/server` is the process that receives those HTTP routes and, for wheel commands, writes this protocol: `ESTOP` becomes `STOP`, and `DRIVE` query parameters become a `DRIVE` line. Encoder samples from `ENC` / `TELEM` are copied into `GET /api/data`. The route list and the fields that are not part of this protocol are in [mission-control.md](mission-control.md).
+The dashboard in `web/mission-control/index.html` speaks same-origin HTTP. It does not write these serial lines itself. `cm4/server` is the process that receives those HTTP routes and writes this protocol. `ESTOP` becomes `STOP` and latches in the server until `RESET`. Arrow keys, the on-screen pad, and mission playback post `DRIVE`, and the page repeats that post while a control is held. If the posts stop, the server coasts the motors (its own watchdog, separate from this 500 ms firmware timeout). Encoder samples and `battery_mv` from `ENC` / `TELEM` are copied into `GET /api/data`. The route list is in [mission-control.md](mission-control.md).

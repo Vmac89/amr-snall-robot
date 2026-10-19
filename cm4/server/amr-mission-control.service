@@ -31,6 +31,18 @@ Environment=AMR_SERIAL_PORT=/dev/ttyAMA0
 Environment=AMR_SERIAL_BAUD=115200
 Environment=AMR_MOCK_SERIAL=0
 Environment=AMR_ALLOW_POWEROFF=0
+# CALIBRATE on the bench, then uncomment. Defaults live in
+# cm4/server/calibration.py and firmware/esp32/include/config.h.
+# Environment=AMR_CLIENT_WATCHDOG_S=0.5
+# Environment=AMR_OBSTACLE_CM=40
+# Environment=AMR_WHEEL_DIAMETER_M=0.065
+# Environment=AMR_TRACK_WIDTH_M=0.20
+# Environment=AMR_TICKS_PER_REV=360
+# Environment=AMR_LEFT_TICK_SIGN=1
+# Environment=AMR_RIGHT_TICK_SIGN=1
+# Environment=AMR_GEOMETRY_CALIBRATED=0
+# Environment=AMR_OBSTACLE_CALIBRATED=0
+# Environment=AMR_BATT_CALIBRATED=0
 Restart=on-failure
 RestartSec=2
 

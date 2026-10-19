@@ -3,7 +3,7 @@
 <package format="3">
   <name>amr_base</name>
   <version>0.1.0</version>
-  <description>Placeholder CM4 package for the home AMR: a serial base-driver bridge and a Kinect bringup node. Neither talks to hardware yet.</description>
+  <description>CM4 bridge: cmd_vel to ESP32 DRIVE, encoder odometry and tf, optional libfreenect Kinect. Geometry parameters are uncalibrated placeholders.</description>
   <maintainer email="Vmac89@users.noreply.github.com">Vlatko Macak</maintainer>
   <license>MIT</license>
 
@@ -13,6 +13,7 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

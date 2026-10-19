@@ -17,12 +17,13 @@ A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-cont
 | Path | Contents |
 | --- | --- |
 | `firmware/esp32` | PlatformIO project for the ESP32 DevKit V1. |
-| `ros2_ws/src/amr_base` | Placeholder ROS 2 package: base-driver bridge and Kinect bringup. |
+| `ros2_ws/src/amr_base` | ROS 2 bridge: `cmd_vel` to `DRIVE`, encoder `odom` and tf, optional libfreenect. Not built in this environment. |
 | `hardware/3d-parts` | Future STL and STEP files. |
 | `hardware/electronics` | Proposed pinout. |
 | `web/mission-control` | ROBZONE Mission Control 11.2 dashboard (static HTML). |
 | `cm4/server` | Flask server for that page, plus the ESP32 serial bridge. |
-| `docs` | Serial protocol and notes on the dashboard's HTTP calls. |
+| `docs` | Serial protocol, dashboard HTTP notes, and the bring-up checklist. |
+| `cm4/install.sh` | CM4 apt packages, `dialout`, and the systemd unit. Does not arm poweroff. |
 
 ## Hardware
 
@@ -72,7 +73,7 @@ Confirm these on the bench. Details and the proposed GPIO map are in [hardware/e
 
 ## Serial link
 
-USB serial and UART2 both speak the line protocol in [docs/serial-protocol.md](docs/serial-protocol.md) at 115200 8N1. The CM4 is expected to send per-wheel `DRIVE` commands. Mixing `cmd_vel` into wheel speeds waits on a measured wheel radius and track width. If the ESP32 is commanding motion and no valid command arrives for 500 ms, it coasts the motors.
+USB serial and UART2 both speak the line protocol in [docs/serial-protocol.md](docs/serial-protocol.md) at 115200 8N1. The CM4 sends per-wheel `DRIVE` commands. `ENC` includes a battery millivolts field from a proposed divider on GPIO 4; the firmware ratio is `1.0` until you enter the real divider. If the ESP32 is commanding motion and no valid command arrives for 500 ms, it coasts the motors. The CM4 server has a separate watchdog: it coasts if the browser stops repeating `DRIVE`.
 
 ## Firmware
 
@@ -86,10 +87,10 @@ The `espressif32` platform pinned in `platformio.ini` packages Arduino-ESP32 2.0
 
 ## ROS 2 workspace
 
-`ros2_ws/src/amr_base` is a placeholder package with two nodes:
+`ros2_ws/src/amr_base` is the CM4 ROS 2 bridge. It was not compiled here (no ROS distro in this environment).
 
-- `base_driver_node` subscribes to `cmd_vel` and advertises `odom`. It does not open a serial port and does not publish odometry.
-- `kinect_freenect_node` advertises image topics. libfreenect is not linked, and no frames are published. Whether model `1505` is a libfreenect (Kinect v1-class) device or needs libfreenect2 is unset.
+- `base_driver_node` opens the ESP32 UART, mixes `cmd_vel` into `DRIVE` with the placeholders in `cm4/server/calibration.py`, and publishes `odom` and tf from encoder ticks. Stop `cm4/server` first. Both cannot own the UART.
+- `kinect_freenect_node` publishes image and depth topics when libfreenect is found at build time. Otherwise it stays quiet. Whether model `1505` is a libfreenect device is unset. Camera intrinsics are zeros.
 
 The ROS 2 distribution on the CM4 is not chosen. When one is installed:
 
@@ -101,16 +102,18 @@ colcon build --packages-select amr_base
 
 ## Roadmap
 
-1. Bench-check grounds, the buck voltage, and the proposed pin map with the motors unplugged.
-2. Flash the ESP32 scaffold. With the wheels off the ground, exercise `DRIVE`, `STOP`, the command timeout, and `ENC`.
-3. Choose a ROS 2 distribution on the CM4. `cm4/server` already forwards per-wheel `DRIVE` / `STOP` and reads `ENC` for the web page. Mixing `cmd_vel` and publishing `odom` still wait on a measured wheel radius and track width.
-4. Identify the Kinect behind the user-supplied model string `1505`, including how it is powered. Link libfreenect for a supported Kinect v1-class device, or a Kinect v2 stack if that is what the sensor is.
-5. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.
-6. Teleoperate the base, then try autonomous navigation once odometry and depth are real.
+The software path for teleop, battery sense, Kinect distance, odometry, and a ROS 2 bridge is in the tree. What is left is measurement and hardware confirmation. The ordered checklist is [docs/bring-up.md](docs/bring-up.md).
+
+1. Bench-check grounds, the buck voltage, the battery divider (meter it before GPIO 4), and the proposed pin map with the motors unplugged.
+2. Flash the ESP32. Confirm `ENC` ticks and that `battery_mv` matches a meter after `kBatteryDividerRatio` is set. Wheels up, check motor direction.
+3. Measure ticks per revolution, wheel diameter, and track width. Set the matching `AMR_*` values, then `AMR_GEOMETRY_CALIBRATED=1` only after a taped distance agrees with `odom`.
+4. Identify the Kinect behind the user-supplied model string `1505`, including how it is powered. `dist` stays uncalibrated until a tape check. Then set `AMR_OBSTACLE_CM`.
+5. Choose a ROS 2 distribution and `colcon build` `amr_base`. Do not run it together with `cm4/server`.
+6. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.
 
 ## Mission control
 
-`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page, checked in as supplied. The CM4 server that implements its routes is `cm4/server`. Without hardware:
+`web/mission-control/index.html` is the ROBZONE Mission Control 11.2 page. Arrow keys, the on-screen pad, and mission playback post `DRIVE`. The CM4 server that implements its routes is `cm4/server`. Install on the Pi with `bash cm4/install.sh` (see [docs/bring-up.md](docs/bring-up.md)). Without hardware:
 
 ```bash
 cd cm4/server
@@ -122,7 +125,7 @@ python3 server.py --mock-serial --host 127.0.0.1 --port 8080
 
 Open `http://127.0.0.1:8080/`.
 
-`ESTOP` is sent to the ESP32 as `STOP`. `POST /api/cmd?action=DRIVE&left=<n>&right=<n>` is sent as `DRIVE`. The page's arrow keys do not call that route; they only move the on-screen cursor. `/api/data` carries `ENC` samples. Battery voltage and obstacle distance are not in the serial protocol, so those fields are `n/a`. Shutdown stays disabled unless `AMR_ALLOW_POWEROFF=1`. Kinect video uses libfreenect when it returns a frame, and a placeholder JPEG otherwise.
+`ESTOP` is sent to the ESP32 as `STOP` and latches until `RESET`. Holding an arrow key or pad button repeats `DRIVE` (PWM 80, a bench duty). Releasing the key, blurring the window, or hiding the page sends a stop, and the server coasts if those posts stop. `/api/data` carries encoder ticks, `batt` from the firmware millivolt field (`batt_calibrated` false until you set it), `dist` from the Kinect when a depth frame exists (otherwise `n/a`), and `odom` from the placeholders. Shutdown stays disabled unless `AMR_ALLOW_POWEROFF=1`. Kinect video uses libfreenect when it returns a frame, and a placeholder JPEG otherwise.
 
 Setup, the systemd example, and the field list are in [cm4/server/README.md](cm4/server/README.md). How each page route maps onto the firmware is in [docs/mission-control.md](docs/mission-control.md).
 

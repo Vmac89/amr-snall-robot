@@ -20,6 +20,8 @@ FIRMWARE_COMMAND_TIMEOUT_S = 0.5
 TELEMETRY_PERIOD_S = 0.1
 # Arbitrary mock scale: PWM counts per telemetry period. Not a motor constant.
 MOCK_TICKS_PER_PERIOD_DIVISOR = 32
+# Fixed stand-in so tests can parse the battery field. Not a pack voltage.
+MOCK_BATT_MV = 3300
 
 
 @dataclass
@@ -70,7 +72,7 @@ class MockEsp32:
             if self.motion:
                 self.ticks_l += self.left // MOCK_TICKS_PER_PERIOD_DIVISOR
                 self.ticks_r += self.right // MOCK_TICKS_PER_PERIOD_DIVISOR
-            self._emit(f"ENC {self.ticks_l} {self.ticks_r}")
+            self._emit(f"ENC {self.ticks_l} {self.ticks_r} {MOCK_BATT_MV}")
 
     def close(self) -> None:
         return None
@@ -115,7 +117,7 @@ class MockEsp32:
             return
         if cmd == "ENC" and len(parts) == 1:
             self._refresh()
-            self._emit(f"ENC {self.ticks_l} {self.ticks_r}")
+            self._emit(f"ENC {self.ticks_l} {self.ticks_r} {MOCK_BATT_MV}")
             return
         if cmd == "TELEM" and len(parts) == 2 and parts[1] in ("0", "1"):
             self.telem = parts[1] == "1"
@@ -166,6 +168,7 @@ class SerialBridge:
         self._lock = threading.Lock()
         self._desired = (0, 0)
         self._enc: tuple[int, int] | None = None
+        self._batt_mv: int | None = None
         self.connected = False
         self.last_error = ""
         self._running = True
@@ -203,9 +206,11 @@ class SerialBridge:
             desired = self._desired
             connected = self.connected
             error = self.last_error
+            batt_mv = self._batt_mv
         return {
             "enc_left": None if enc is None else enc[0],
             "enc_right": None if enc is None else enc[1],
+            "batt_mv": batt_mv,
             "drive_left": desired[0],
             "drive_right": desired[1],
             "serial_connected": connected,
@@ -324,14 +329,17 @@ class SerialBridge:
     def _handle(self, line: str) -> None:
         if line.startswith("ENC "):
             parts = line.split()
-            if len(parts) == 3:
+            if len(parts) >= 3:
                 try:
                     left = int(parts[1])
                     right = int(parts[2])
+                    batt_mv = int(parts[3]) if len(parts) >= 4 else None
                 except ValueError:
                     return
                 with self._lock:
                     self._enc = (left, right)
+                    if batt_mv is not None:
+                        self._batt_mv = batt_mv
             return
         if line == "READY":
             return

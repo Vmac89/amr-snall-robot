@@ -2,7 +2,7 @@
 
 PlatformIO project for the ESP32 DevKit V1. It drives two motors through an L298N, counts quadrature encoder edges, and speaks the serial protocol in [docs/serial-protocol.md](../../docs/serial-protocol.md).
 
-GPIO numbers are the proposed map in [hardware/electronics/pinout.md](../../hardware/electronics/pinout.md).
+GPIO numbers are the proposed map in [hardware/electronics/pinout.md](../../hardware/electronics/pinout.md). `ENC` lines include battery millivolts from GPIO 4 times `kBatteryDividerRatio` (`1.0` until you measure the divider).
 
 ## Build
 

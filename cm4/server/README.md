@@ -2,16 +2,19 @@
 
 Flask process that serves `web/mission-control/index.html` and the HTTP routes that page calls. It runs on the Raspberry Pi CM4. Wheel commands and encoder samples use the ESP32 line protocol in [docs/serial-protocol.md](../../docs/serial-protocol.md).
 
-The stock dashboard does not send drive commands. Arrow keys, teaching, and mission playback stay in the browser. Motor commands are:
+The page posts `DRIVE` from the arrow keys, the on-screen pad, and mission playback, and repeats that post about every 150 ms while a control is held. The same routes from curl:
 
 ```bash
 curl -X POST 'http://127.0.0.1:8080/api/cmd?action=DRIVE&left=80&right=-40'
 curl -X POST 'http://127.0.0.1:8080/api/cmd?action=ESTOP'
+curl -X POST 'http://127.0.0.1:8080/api/cmd?action=RESET'
 ```
 
-`ESTOP` and `STOP` are written to the ESP32 as `STOP`. `DRIVE` is written as `DRIVE <left> <right>` with each value limited to `-255..255`, matching the firmware. While either value is non-zero, the server repeats that `DRIVE` line every 200 ms so the firmware's 500 ms command timeout does not coast the motors.
+`ESTOP` is written as serial `STOP` and latches until `RESET` (HTTP 409 on later `DRIVE`). `STOP` coasts without latching. `DRIVE` is written as `DRIVE <left> <right>` with each value limited to `-255..255`. If the browser stops repeating `DRIVE` for `AMR_CLIENT_WATCHDOG_S` (0.5 s), the server sends `STOP`. `/api/data` and `PING` do not refresh that timer. While the client still wants motion, the server repeats `DRIVE` to the ESP32 every 200 ms so the firmware's 500 ms timeout does not coast the motors.
 
-`GET /api/data` includes `enc_left` and `enc_right` from `ENC` lines. On connect the server sends `TELEM 1`, and the firmware then emits `ENC` about every 100 ms. `batt` and `dist` are the string `n/a`: the serial protocol has no battery voltage and no range reading. The page prints whatever truthy string it is given, and it would otherwise substitute `12.4` and `0`. `temp` is the CM4 CPU thermal zone when `/sys/class/thermal/thermal_zone0/temp` exists (Linux millidegrees), and `n/a` when that file is missing. It is not a motor or pack temperature.
+`GET /api/data` includes `enc_left` and `enc_right` from `ENC` lines, and `batt` from the firmware `battery_mv` field (millivolts / 1000). `batt_calibrated` stays false until `AMR_BATT_CALIBRATED=1`. `dist` is centimetres from the Kinect depth center window when a frame exists, otherwise `n/a`. `dist_calibrated` is always false. `odom` is the pose integrated from tick deltas using the placeholders in `calibration.py`; `odom.calibrated` stays false until `AMR_GEOMETRY_CALIBRATED=1`. `temp` is the CM4 CPU thermal zone when `/sys/class/thermal/thermal_zone0/temp` exists, and `n/a` when that file is missing. It is not a motor or pack temperature.
+
+If `dist` is a number below `AMR_OBSTACLE_CM` (placeholder 40), positive wheel commands are zeroed and reverse is still allowed. A missing distance does not block motion.
 
 `/video_feed` is an MJPEG stream. If `libfreenect` can import and return a frame, that frame is JPEG-encoded. Otherwise the stream repeats a placeholder image. Tilt buttons call `GET /tilt/up` and `GET /tilt/down`. Each step changes a setpoint by 5 degrees, clamped to ±30 degrees because that is libfreenect's `TILT_MAX_DEGREES`. The setpoint is sent only when libfreenect exposes a tilt function and the call returns. The page logs "Tilt success" whenever the JSON parses; the `applied` field is the one that says whether a device was commanded. The Kinect model string `1505` has not been matched to a libfreenect device.
 
@@ -19,9 +22,9 @@ Map save/load uses a JSON file, `cm4/server/data/robzone_map.json` unless `AMR_M
 
 `POST /api/poweroff` does not shut the machine down unless `AMR_ALLOW_POWEROFF=1` (or `--allow-poweroff`) is set. The default is off, and the route then returns HTTP 403 with `status: error`. When it is armed, the server runs `shutdown -h now`. The process needs permission for that command. This halts the computer the server is running on.
 
-Mock serial (`--mock-serial` or `AMR_MOCK_SERIAL=1`) does not open a UART. It answers the same command lines as the firmware. While a non-zero `DRIVE` is latched, mock tick counts change by `command // 32` once per 100 ms telemetry period. That divisor is a stand-in so the dashboard has numbers to show. It is not an encoder count, gear ratio, or measured speed.
+Mock serial (`--mock-serial` or `AMR_MOCK_SERIAL=1`) does not open a UART. It answers the same command lines as the firmware. While a non-zero `DRIVE` is latched, mock tick counts change by `command // 32` once per 100 ms telemetry period. The mock battery field is a fixed 3300 mV. Neither number is an encoder count, gear ratio, pack voltage, or measured speed.
 
-Wheel radius and track width are still unset, so this server does not turn `cmd_vel` into wheel speeds and it does not publish odometry.
+Wheel diameter, track width, and ticks per revolution are placeholders. The server still integrates a pose so `/api/data` has an `odom` object, and it labels that pose uncalibrated. `cmd_vel` mixing lives in the ROS 2 node, which must not run while this server holds the UART. The bench steps are [docs/bring-up.md](../../docs/bring-up.md). `bash cm4/install.sh` from a login user on the CM4 installs the apt packages, adds `dialout`, and installs the systemd unit.
 
 ## Run without hardware
 
@@ -61,6 +64,16 @@ The account needs access to that device (on Raspberry Pi OS, typically membershi
 | `AMR_MOCK_SERIAL` | off | `1` enables the in-process ESP32 stand-in |
 | `AMR_ALLOW_POWEROFF` | off | `1` arms `shutdown -h now` |
 | `AMR_MAP_PATH` | `cm4/server/data/robzone_map.json` | Map file |
+| `AMR_CLIENT_WATCHDOG_S` | `0.5` | Coast if `DRIVE` posts stop |
+| `AMR_OBSTACLE_CM` | `40` | CALIBRATE. Forward stop distance |
+| `AMR_WHEEL_DIAMETER_M` | `0.065` | CALIBRATE |
+| `AMR_TRACK_WIDTH_M` | `0.20` | CALIBRATE |
+| `AMR_TICKS_PER_REV` | `360` | CALIBRATE |
+| `AMR_LEFT_TICK_SIGN` | `1` | CALIBRATE. `-1` flips that wheel |
+| `AMR_RIGHT_TICK_SIGN` | `1` | CALIBRATE |
+| `AMR_GEOMETRY_CALIBRATED` | off | Set `1` only after a taped check |
+| `AMR_OBSTACLE_CALIBRATED` | off | Reported only. Does not change the threshold |
+| `AMR_BATT_CALIBRATED` | off | Set `1` only after the divider matches a meter |
 
 ## systemd
 

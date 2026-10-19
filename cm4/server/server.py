@@ -2,8 +2,8 @@
 
 Serves web/mission-control/index.html and the routes that page calls.
 Wheel commands go out as ESP32 serial DRIVE / STOP lines. Encoder samples
-from ENC / TELEM come back on /api/data. There is no wheel-geometry math
-in this process.
+and the firmware battery field come back on /api/data. Pose uses the
+placeholders in calibration.py.
 """
 
 from __future__ import annotations
@@ -13,13 +13,25 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from serial_bridge import WHEEL_MAX, WHEEL_MIN, SerialBridge, SerialPort, MockEsp32
+from calibration import (
+    CLIENT_WATCHDOG_S,
+    LEFT_TICK_SIGN,
+    OBSTACLE_STOP_CM,
+    RIGHT_TICK_SIGN,
+    TICKS_PER_REV,
+    TRACK_WIDTH_M,
+    WHEEL_DIAMETER_M,
+)
+from odometry import Odometry
+from safety import EstopLatched, Safety
+from serial_bridge import WHEEL_MAX, WHEEL_MIN, MockEsp32, SerialBridge, SerialPort
 from video_source import KinectSource
 
 logger = logging.getLogger("amr.cm4")
@@ -40,10 +52,36 @@ class Config:
     allow_poweroff: bool = False
     map_path: Path = DEFAULT_MAP
     poweroff_fn: object | None = None
+    watchdog_s: float = CLIENT_WATCHDOG_S
+    obstacle_cm: float = OBSTACLE_STOP_CM
+    wheel_diameter_m: float = WHEEL_DIAMETER_M
+    track_width_m: float = TRACK_WIDTH_M
+    ticks_per_rev: float = TICKS_PER_REV
+    left_tick_sign: int = LEFT_TICK_SIGN
+    right_tick_sign: int = RIGHT_TICK_SIGN
+    # Set true only after the placeholders above have been replaced with
+    # measurements. The server does not infer this from the numbers.
+    geometry_calibrated: bool = False
+    obstacle_calibrated: bool = False
+    batt_calibrated: bool = False
 
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if raw == "":
+        return default
+    return float(raw)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if raw == "":
+        return default
+    return int(raw)
 
 
 def config_from_env() -> Config:
@@ -56,6 +94,16 @@ def config_from_env() -> Config:
         mock_serial=_env_flag("AMR_MOCK_SERIAL"),
         allow_poweroff=_env_flag("AMR_ALLOW_POWEROFF"),
         map_path=Path(map_env) if map_env else DEFAULT_MAP,
+        watchdog_s=_env_float("AMR_CLIENT_WATCHDOG_S", CLIENT_WATCHDOG_S),
+        obstacle_cm=_env_float("AMR_OBSTACLE_CM", OBSTACLE_STOP_CM),
+        wheel_diameter_m=_env_float("AMR_WHEEL_DIAMETER_M", WHEEL_DIAMETER_M),
+        track_width_m=_env_float("AMR_TRACK_WIDTH_M", TRACK_WIDTH_M),
+        ticks_per_rev=_env_float("AMR_TICKS_PER_REV", TICKS_PER_REV),
+        left_tick_sign=_env_int("AMR_LEFT_TICK_SIGN", LEFT_TICK_SIGN),
+        right_tick_sign=_env_int("AMR_RIGHT_TICK_SIGN", RIGHT_TICK_SIGN),
+        geometry_calibrated=_env_flag("AMR_GEOMETRY_CALIBRATED"),
+        obstacle_calibrated=_env_flag("AMR_OBSTACLE_CALIBRATED"),
+        batt_calibrated=_env_flag("AMR_BATT_CALIBRATED"),
     )
 
 
@@ -70,6 +118,32 @@ def default_poweroff() -> None:
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "shutdown failed").strip()
         raise RuntimeError(detail)
+
+
+def _format_batt(batt_mv: int | None) -> str:
+    if batt_mv is None:
+        return "n/a"
+    return f"{batt_mv / 1000.0:.2f}"
+
+
+def _watchdog_loop(stop: threading.Event, safety: Safety, bridge: SerialBridge) -> None:
+    while not stop.wait(0.05):
+        if not safety.expired():
+            continue
+        safety.note_watchdog()
+        try:
+            bridge.estop()
+        except (ConnectionError, TimeoutError) as exc:
+            logger.warning("watchdog stop failed: %s", exc)
+        logger.info("client drive watchdog expired; motors coasted")
+
+
+def _odom_loop(stop: threading.Event, odom: Odometry, bridge: SerialBridge) -> None:
+    while not stop.wait(0.05):
+        snap = bridge.snapshot()
+        if snap["enc_left"] is None or snap["enc_right"] is None:
+            continue
+        odom.update(snap["enc_left"], snap["enc_right"])
 
 
 def cpu_temp_c() -> float | None:
@@ -92,11 +166,37 @@ def create_app(config: Config) -> Flask:
             mock=False,
         )
     kinect = KinectSource()
+    safety = Safety(
+        watchdog_s=config.watchdog_s,
+        obstacle_cm=config.obstacle_cm,
+        obstacle_calibrated=config.obstacle_calibrated,
+    )
+    odom = Odometry(
+        wheel_diameter_m=config.wheel_diameter_m,
+        track_width_m=config.track_width_m,
+        ticks_per_rev=config.ticks_per_rev,
+        left_sign=config.left_tick_sign,
+        right_sign=config.right_tick_sign,
+        calibrated=config.geometry_calibrated,
+    )
+    stop = threading.Event()
+    watchdog = threading.Thread(
+        target=_watchdog_loop, args=(stop, safety, bridge), name="client-watchdog", daemon=True
+    )
+    odom_thread = threading.Thread(
+        target=_odom_loop, args=(stop, odom, bridge), name="odometry", daemon=True
+    )
     bridge.start()
     kinect.start()
+    watchdog.start()
+    odom_thread.start()
     app.extensions["amr_bridge"] = bridge
     app.extensions["amr_kinect"] = kinect
     app.extensions["amr_config"] = config
+    app.extensions["amr_safety"] = safety
+    app.extensions["amr_odom"] = odom
+    app.extensions["amr_stop"] = stop
+    app.extensions["amr_threads"] = (watchdog, odom_thread)
 
     @app.get("/")
     def index():
@@ -128,15 +228,23 @@ def create_app(config: Config) -> Flask:
     @app.get("/api/data")
     def api_data():
         body = bridge.snapshot()
-        # No pack voltage or range sensor is on the serial protocol. A truthy
-        # token keeps the page from substituting its own 12.4 V / 0 cm text.
-        # temp is the CPU thermal zone when that sysfs file exists.
         temp = cpu_temp_c()
         body["temp"] = temp if temp is not None else "n/a"
-        body["batt"] = "n/a"
-        body["dist"] = "n/a"
+        # Firmware millivolts already include kBatteryDividerRatio. The
+        # calibrated flag stays false until AMR_BATT_CALIBRATED=1.
+        body["batt"] = _format_batt(body.pop("batt_mv"))
+        body["batt_calibrated"] = config.batt_calibrated
+        if kinect.distance_cm is None:
+            body["dist"] = "n/a"
+        else:
+            body["dist"] = kinect.distance_cm
+        body["dist_note"] = kinect.distance_note
+        body["dist_calibrated"] = False
         body["kinect_live"] = kinect.live
         body["tilt_setpoint_deg"] = kinect.angle
+        body["estop_latched"] = safety.latched
+        body["safety"] = safety.snapshot()
+        body["odom"] = odom.snapshot()
         return jsonify(body)
 
     @app.get("/tilt/<direction>")
@@ -148,8 +256,17 @@ def create_app(config: Config) -> Flask:
     @app.post("/api/cmd")
     def api_cmd():
         action = request.args.get("action", "").strip()
+        obstacle_stop = False
         try:
-            if action in ("ESTOP", "STOP"):
+            if action == "ESTOP":
+                safety.estop()
+                serial_line = bridge.estop()
+                mapped = "STOP"
+            elif action == "RESET":
+                safety.reset()
+                return jsonify(status="ok", action=action, mapped="RESET", serial="")
+            elif action == "STOP":
+                safety.note_coast()
                 serial_line = bridge.estop()
                 mapped = "STOP"
             elif action == "PING":
@@ -179,13 +296,22 @@ def create_app(config: Config) -> Flask:
                         ),
                         400,
                     )
-                serial_line = bridge.drive(left, right)
-                mapped = f"DRIVE {left} {right}"
+                try:
+                    left, right = safety.accept_drive(left, right, kinect.distance_cm)
+                except EstopLatched as exc:
+                    return jsonify(status="error", message=str(exc), estop_latched=True), 409
+                obstacle_stop = safety.obstacle_stop
+                if left == 0 and right == 0:
+                    serial_line = bridge.estop()
+                    mapped = "STOP"
+                else:
+                    serial_line = bridge.drive(left, right)
+                    mapped = f"DRIVE {left} {right}"
             else:
                 return (
                     jsonify(
                         status="error",
-                        message="unsupported action; use ESTOP, STOP, DRIVE, or PING",
+                        message="unsupported action; use ESTOP, STOP, RESET, DRIVE, or PING",
                     ),
                     400,
                 )
@@ -196,7 +322,14 @@ def create_app(config: Config) -> Flask:
         status = "ok" if serial_line in ("OK", "PONG") else "error"
         code = 200 if status == "ok" else 502
         return (
-            jsonify(status=status, action=action, mapped=mapped, serial=serial_line),
+            jsonify(
+                status=status,
+                action=action,
+                mapped=mapped,
+                serial=serial_line,
+                obstacle_stop=obstacle_stop,
+                estop_latched=safety.latched,
+            ),
             code,
         )
 

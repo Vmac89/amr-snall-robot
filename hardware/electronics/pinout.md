@@ -76,7 +76,13 @@ Data path is USB from the Kinect to the CM4. The user-supplied model string is `
 
 ## GPIOs left unused
 
-Left free on purpose: GPIO 4, 5, 13, 18, 19, 21, 22, 23.
+## Battery sense
+
+| ESP32 GPIO | Function | Notes |
+| --- | --- | --- |
+| 4 | ADC for a pack divider | Proposed. ADC2 channel. WiFi is unused in this firmware. Do not connect the pack to this pin. Meter the divider output first. `kBatteryDividerRatio` is `1.0` until you enter `(R_top + R_bottom) / R_bottom`. |
+
+Left free on purpose: GPIO 5, 13, 18, 19, 21, 22, 23. GPIO 4 is reserved above for the divider.
 
 Left unused because they are poor harness pins on a DevKit V1:
 

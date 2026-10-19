@@ -62,6 +62,7 @@
         .stat-label { font-size: 0.6rem; color: #666; text-transform: uppercase; display: block; }
         .stat-value { font-size: 1.2rem; font-family: monospace; font-weight: bold; }
         .health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .drive-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
         .btn { background: transparent; border: 1px solid var(--neon-green); color: var(--neon-green); padding: 12px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.7rem; border-radius: 2px; }
         .btn:hover { background: var(--neon-green); color: #000; }
@@ -160,11 +161,20 @@
             <span id="radar-val" class="stat-value" style="color:#ffcc00;">0.0 CM</span>
         </div>
 
+        <!-- On-screen drive. Same commands as the arrow keys. Look matches .btn. -->
+        <div class="drive-pad" id="drive-pad">
+            <button class="btn" type="button" data-drive="up">▲ FWD</button>
+            <button class="btn" type="button" data-drive="down">▼ BACK</button>
+            <button class="btn" type="button" data-drive="left">◀ LEFT</button>
+            <button class="btn" type="button" data-drive="right">RIGHT ▶</button>
+        </div>
+
         <button id="rec-btn" class="btn" onclick="toggleRec()">🔴 START TEACHING</button>
         <button class="btn btn-danger" style="margin-top: 5px; border-color: #ff9900; color: #ff9900;" onclick="clearTrail()">🗑️ CLEAR PATH TRACE</button>
         <button class="btn" style="margin-top: 5px; border-color: var(--info); color: var(--info);" onclick="resetCursor()">📍 RESET CURSOR</button>
         <button class="btn btn-danger" style="margin-top:auto; margin-bottom: 10px; background: rgba(255, 51, 51, 0.15); border-color: var(--danger); color: var(--danger);" onclick="triggerPowerOff()">🔌 SHUTDOWN RASPBERRY PI</button>
-        <button class="btn btn-danger" onclick="sendCmd('ESTOP')">⛔ EMERGENCY STOP</button>
+        <button id="estop-btn" class="btn btn-danger" onclick="emergencyStop()">⛔ EMERGENCY STOP</button>
+        <button class="btn" onclick="sendCmd('RESET')">RESET ESTOP</button>
     </div>
 
     <div id="map-area">
@@ -214,6 +224,13 @@
         let editingStationIndex = null;
         let startPoint = { x: 0, y: 0, angle: -Math.PI / 2 };
 
+        // CALIBRATE. Bench PWM while a key or pad button is held. Not a measured speed.
+        // Matches PAGE_DRIVE_PWM in cm4/server/calibration.py.
+        const DRIVE_PWM = 80;
+        // Repeat faster than the server watchdog (CLIENT_WATCHDOG_S, 0.5 s).
+        const DRIVE_REPEAT_MS = 150;
+        const held = { up: false, down: false, left: false, right: false };
+
         function init() {
             canvas.width = canvas.clientWidth;
             canvas.height = canvas.clientHeight;
@@ -224,8 +241,17 @@
             
             canvas.addEventListener('click', handleCanvasClick);
             window.addEventListener('keydown', handleKeyboardControl);
+            window.addEventListener('keyup', handleKeyUp);
+            // Releasing the page must coast the wheels, same as letting go of a key.
+            window.addEventListener('blur', haltMotion);
+            window.addEventListener('pagehide', haltMotion);
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) haltMotion();
+            });
+            bindDrivePad();
             
             setInterval(fetchTelemetry, 1000);
+            setInterval(refreshDrive, DRIVE_REPEAT_MS);
             animateRobotSimulation();
         }
 
@@ -292,13 +318,21 @@
             }
         }
 
+        // Only a missing sample is "n/a". Numeric 0 must stay 0 (the old || fallback
+        // turned 0 into 12.4 V / 0.0°C and hid a real zero).
+        function metric(value, fallback) {
+            if (value === null || value === undefined || value === '') return fallback;
+            return value;
+        }
+
         function fetchTelemetry() {
             fetch('/api/data')
                 .then(res => res.json())
                 .then(data => {
-                    document.getElementById('temp-val').innerText = (data.temp || '0.0') + '°C';
-                    document.getElementById('batt-val').innerText = (data.batt || '12.4') + 'V';
-                    document.getElementById('radar-val').innerText = (data.dist || '0') + ' CM';
+                    document.getElementById('temp-val').innerText = metric(data.temp, 'n/a') + '°C';
+                    document.getElementById('batt-val').innerText = metric(data.batt, 'n/a') + 'V';
+                    document.getElementById('radar-val').innerText = metric(data.dist, 'n/a') + ' CM';
+                    if (data.estop_latched) markEstop(true);
                 })
                 .catch(() => console.log("Telemetry link offline."));
         }
@@ -330,7 +364,13 @@
                 })
                 .catch(() => alert("❌ CONNECTION FAILURE: Server unreachable."));
             } else {
-                fetch(`/api/cmd?action=${command}`, { method: 'POST' });
+                fetch(`/api/cmd?action=${command}`, { method: 'POST' })
+                    .then(res => res.json().then(data => ({ ok: res.ok, status: res.status, data: data })))
+                    .then(result => {
+                        if (command === 'RESET' && result.ok) markEstop(false);
+                        if (result.status === 409) markEstop(true);
+                    })
+                    .catch(() => {});
             }
         }
 
@@ -366,7 +406,11 @@
                 
                 if (currentStep >= trail.length) {
                     isRepeating = false;
-                    alert("🔁 MISSION EXECUTION COMPLETED!");
+                    // Alert is modal and would hold the last DRIVE until dismissed.
+                    // Wait until the stop request has been sent.
+                    postDrive(0, 0).then(function () {
+                        alert("🔁 MISSION EXECUTION COMPLETED!");
+                    });
                     return;
                 }
 
@@ -396,9 +440,17 @@
 
                 currentStep++;
 
+                if (!isRepeating) return;
+
                 if (stationHaltTriggered) {
                     console.log(`[STATION HALT] Arrived at: ${activeStationName}. Halting mission for ${activeStationDuration}s.`);
                     dynamicDelay = activeStationDuration * 1000;
+                    // Coast for the pause. The server watchdog is not a latch.
+                    postDrive(0, 0);
+                } else {
+                    // Screen heading vs forward. See playbackDrive.
+                    const cmd = playbackDrive(robotPos.angle);
+                    postDrive(cmd.left, cmd.right);
                 }
 
                 setTimeout(runPlaybackStep, dynamicDelay);
@@ -457,29 +509,152 @@
             }
         }
 
-        function handleKeyboardControl(e) {
-            if (!isRecording || isRepeating) return;
-            const moveSpeed = 4;
-            const turnSpeed = 0.15;
-
-            if (e.key === 'ArrowUp') {
-                robotPos.x += Math.cos(robotPos.angle) * moveSpeed;
-                robotPos.y += Math.sin(robotPos.angle) * moveSpeed;
-                trail.push({ x: robotPos.x, y: robotPos.y });
-                e.preventDefault();
-            } else if (e.key === 'ArrowDown') {
-                robotPos.x -= Math.cos(robotPos.angle) * moveSpeed;
-                robotPos.y -= Math.sin(robotPos.angle) * moveSpeed;
-                trail.push({ x: robotPos.x, y: robotPos.y });
-                e.preventDefault();
-            } else if (e.key === 'ArrowLeft') {
-                robotPos.angle -= turnSpeed; e.preventDefault();
-            } else if (e.key === 'ArrowRight') {
-                robotPos.angle += turnSpeed; e.preventDefault();
+        // Screen-up (angle -π/2) is treated as robot forward. Confirm on the bench.
+        // The 0.5 rad spin threshold is a tune, not a measurement. Positive canvas
+        // error is clockwise, which is a right spin (left wheel forward).
+        function playbackDrive(angle) {
+            const forward = -Math.PI / 2;
+            let err = angle - forward;
+            while (err > Math.PI) err -= 2 * Math.PI;
+            while (err < -Math.PI) err += 2 * Math.PI;
+            if (Math.abs(err) > 0.5) {
+                if (err > 0) return { left: DRIVE_PWM, right: -DRIVE_PWM };
+                return { left: -DRIVE_PWM, right: DRIVE_PWM };
             }
-            
-            robotPos.x = Math.max(10, Math.min(canvas.width - 10, robotPos.x));
-            robotPos.y = Math.max(10, Math.min(canvas.height - 10, robotPos.y));
+            return { left: DRIVE_PWM, right: DRIVE_PWM };
+        }
+
+        function wheelsFromHeld() {
+            let left = 0;
+            let right = 0;
+            if (held.up) { left += DRIVE_PWM; right += DRIVE_PWM; }
+            if (held.down) { left -= DRIVE_PWM; right -= DRIVE_PWM; }
+            if (held.left) { left -= DRIVE_PWM; right += DRIVE_PWM; }
+            if (held.right) { left += DRIVE_PWM; right -= DRIVE_PWM; }
+            left = Math.max(-255, Math.min(255, left));
+            right = Math.max(-255, Math.min(255, right));
+            return { left: left, right: right };
+        }
+
+        function anyHeld() {
+            return held.up || held.down || held.left || held.right;
+        }
+
+        function postDrive(left, right) {
+            return fetch('/api/cmd?action=DRIVE&left=' + left + '&right=' + right, { method: 'POST' })
+                .then(res => res.json().then(data => ({ status: res.status, data: data })))
+                .then(result => {
+                    if (result.status === 409 || (result.data && result.data.estop_latched)) markEstop(true);
+                })
+                .catch(() => {});
+        }
+
+        // Keep the server watchdog fresh while a control is held. /api/data does not.
+        function refreshDrive() {
+            if (isRepeating || !anyHeld()) return;
+            const cmd = wheelsFromHeld();
+            postDrive(cmd.left, cmd.right);
+        }
+
+        function setHeld(dir, down) {
+            if (!Object.prototype.hasOwnProperty.call(held, dir)) return;
+            held[dir] = down;
+            if (!anyHeld()) postDrive(0, 0);
+            else if (!isRepeating) refreshDrive();
+        }
+
+        function haltMotion() {
+            held.up = false;
+            held.down = false;
+            held.left = false;
+            held.right = false;
+            isRepeating = false;
+            postDrive(0, 0);
+        }
+
+        function emergencyStop() {
+            isRepeating = false;
+            held.up = false;
+            held.down = false;
+            held.left = false;
+            held.right = false;
+            markEstop(true);
+            fetch('/api/cmd?action=ESTOP', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => { if (data.estop_latched) markEstop(true); })
+                .catch(() => {});
+        }
+
+        function markEstop(on) {
+            const btn = document.getElementById('estop-btn');
+            if (!btn) return;
+            if (on) btn.classList.add('btn-active');
+            else btn.classList.remove('btn-active');
+        }
+
+        function bindDrivePad() {
+            document.querySelectorAll('[data-drive]').forEach(function (btn) {
+                const dir = btn.getAttribute('data-drive');
+                const press = function (event) {
+                    event.preventDefault();
+                    setHeld(dir, true);
+                };
+                const release = function (event) {
+                    event.preventDefault();
+                    setHeld(dir, false);
+                };
+                btn.addEventListener('pointerdown', press);
+                btn.addEventListener('pointerup', release);
+                btn.addEventListener('pointerleave', release);
+                btn.addEventListener('pointercancel', release);
+            });
+        }
+
+        function typingTarget(event) {
+            const tag = event.target && event.target.tagName;
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+        }
+
+        function handleKeyUp(event) {
+            if (typingTarget(event)) return;
+            if (event.key === 'ArrowUp') setHeld('up', false);
+            else if (event.key === 'ArrowDown') setHeld('down', false);
+            else if (event.key === 'ArrowLeft') setHeld('left', false);
+            else if (event.key === 'ArrowRight') setHeld('right', false);
+        }
+
+        function handleKeyboardControl(e) {
+            if (typingTarget(e) || e.repeat) return;
+            const driveKey = e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+                e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+            if (!driveKey) return;
+            e.preventDefault();
+            // Teaching still draws the canvas path. Playback owns the wheels,
+            // so a held arrow does not also post DRIVE during a mission.
+            if (isRecording && !isRepeating) {
+                const moveSpeed = 4;
+                const turnSpeed = 0.15;
+                if (e.key === 'ArrowUp') {
+                    robotPos.x += Math.cos(robotPos.angle) * moveSpeed;
+                    robotPos.y += Math.sin(robotPos.angle) * moveSpeed;
+                    trail.push({ x: robotPos.x, y: robotPos.y });
+                } else if (e.key === 'ArrowDown') {
+                    robotPos.x -= Math.cos(robotPos.angle) * moveSpeed;
+                    robotPos.y -= Math.sin(robotPos.angle) * moveSpeed;
+                    trail.push({ x: robotPos.x, y: robotPos.y });
+                } else if (e.key === 'ArrowLeft') {
+                    robotPos.angle -= turnSpeed;
+                } else if (e.key === 'ArrowRight') {
+                    robotPos.angle += turnSpeed;
+                }
+                robotPos.x = Math.max(10, Math.min(canvas.width - 10, robotPos.x));
+                robotPos.y = Math.max(10, Math.min(canvas.height - 10, robotPos.y));
+            }
+            if (isRepeating) return;
+            if (e.key === 'ArrowUp') setHeld('up', true);
+            else if (e.key === 'ArrowDown') setHeld('down', true);
+            else if (e.key === 'ArrowLeft') setHeld('left', true);
+            else if (e.key === 'ArrowRight') setHeld('right', true);
         }
 
         function handleCanvasClick(e) {

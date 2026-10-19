@@ -11,6 +11,8 @@ import io
 import logging
 import threading
 
+from depth_range import front_distance_cm
+
 logger = logging.getLogger("amr.cm4.video")
 
 # libfreenect include/libfreenect.h: #define TILT_MAX_DEGREES 30
@@ -55,6 +57,8 @@ class KinectSource:
         self.angle = 0.0
         self.live = False
         self.detail = "not started"
+        self.distance_cm: float | None = None
+        self.distance_note = "no depth frame"
         self._latest = _placeholder_jpeg()
         self._placeholder = self._latest
         self._freenect = None
@@ -111,6 +115,7 @@ class KinectSource:
 
         def worker() -> None:
             frame = self._capture_once()
+            self._update_distance()
             if frame is None:
                 self.live = False
                 self._latest = self._placeholder
@@ -149,6 +154,32 @@ class KinectSource:
             self.detail = str(exc)
             return None
         return buf.getvalue()
+
+    def _update_distance(self) -> None:
+        freenect = self._freenect
+        if freenect is None:
+            self.distance_cm = None
+            self.distance_note = self.detail
+            return
+        mode = "raw11"
+        try:
+            mm_format = getattr(freenect, "DEPTH_MM", None)
+            if mm_format is None:
+                got = freenect.sync_get_depth()
+            else:
+                got = freenect.sync_get_depth(format=mm_format)
+                mode = "mm"
+        except Exception as exc:
+            self.distance_cm = None
+            self.distance_note = str(exc)
+            return
+        if not got:
+            self.distance_cm = None
+            self.distance_note = "no depth frame"
+            return
+        cm, note = front_distance_cm(got[0], mode)
+        self.distance_cm = cm
+        self.distance_note = note
 
     def _apply_tilt(self, angle: float) -> tuple[bool, str]:
         freenect = self._load()

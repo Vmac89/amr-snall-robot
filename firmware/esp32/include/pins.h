@@ -23,6 +23,12 @@ constexpr int kRightEncB = 39;
 constexpr int kCm4Rx = 16;
 constexpr int kCm4Tx = 17;
 
+// CALIBRATE. Proposed ADC pin for a pack-voltage divider. GPIO 4 is ADC2
+// and is free on the DevKit map in this repo. WiFi is unused here; ADC2
+// is unreliable while the radio is on. Do not connect the pack to this
+// pin directly. Confirm the wire before trusting the reading.
+constexpr int kBatteryAdc = 4;
+
 constexpr int kLeftPwmChannel = 0;
 constexpr int kRightPwmChannel = 1;
 

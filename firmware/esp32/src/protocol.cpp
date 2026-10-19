@@ -3,6 +3,7 @@
 #include "config.h"
 #include "drive.h"
 #include "encoders.h"
+#include "pins.h"
 
 #include <Arduino.h>
 
@@ -31,11 +32,27 @@ uint32_t g_last_telem_ms = 0;
 
 void reply(PortState &ps, const char *text) { ps.port->println(text); }
 
+int batteryMillivolts() {
+  // analogReadMilliVolts uses the eFuse ADC calibration when the module
+  // has it. Attenuation is the nominal ~0–3.3 V range, not a measured
+  // full-scale voltage. The divider ratio then scales pin millivolts.
+  const int pin_mv = analogReadMilliVolts(pins::kBatteryAdc);
+  float scaled = static_cast<float>(pin_mv) * kBatteryDividerRatio;
+  if (scaled < 0.0f) {
+    scaled = 0.0f;
+  }
+  if (scaled > 60000.0f) {
+    scaled = 60000.0f;
+  }
+  return static_cast<int>(scaled + 0.5f);
+}
+
 void emitEncoders(HardwareSerial &port) {
-  char line[48];
-  std::snprintf(line, sizeof line, "ENC %ld %ld",
+  char line[64];
+  std::snprintf(line, sizeof line, "ENC %ld %ld %d",
                 static_cast<long>(encoderLeft()),
-                static_cast<long>(encoderRight()));
+                static_cast<long>(encoderRight()),
+                batteryMillivolts());
   port.println(line);
 }
 
@@ -192,6 +209,7 @@ LineEvent pollPort(PortState &ps, char *out, size_t out_cap) {
 }  // namespace
 
 void protocolBegin(HardwareSerial &usb, HardwareSerial &cm4) {
+  analogSetPinAttenuation(pins::kBatteryAdc, ADC_11db);
   g_ports[0] = PortState{&usb, {}, 0, false, false};
   g_ports[1] = PortState{&cm4, {}, 0, false, false};
   g_last_telem_ms = millis();
