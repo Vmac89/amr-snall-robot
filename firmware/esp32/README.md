@@ -1,6 +1,8 @@
 # ESP32 firmware
 
-PlatformIO project for the ESP32 DevKit V1. It drives two motors through an L298N, counts quadrature encoder edges, and speaks the serial protocol in [docs/serial-protocol.md](../../docs/serial-protocol.md).
+PlatformIO project for the ESP32 DevKit V4 (same pinout as V1). It drives two JGA25-371 motors through an L298N, counts quadrature encoder edges, and speaks the serial protocol in [docs/serial-protocol.md](../../docs/serial-protocol.md).
+
+Hall A/B use GPIO 18/19 (left) and GPIO 21/22 (right), with internal pull-ups. Expected ticks per wheel revolution are `kHallPulsesPerMotorRev * kGearRatio * kQuadratureMultiplier` in `include/config.h` (`11 * 9.6 * 4`). `kGearRatio` is a TODO until the 10-turn count in the bring-up checklist. The firmware still reports raw ticks; it does not divide by that constant.
 
 GPIO numbers are the proposed map in [hardware/electronics/pinout.md](../../hardware/electronics/pinout.md). `ENC` lines include battery millivolts from GPIO 4 times `kBatteryDividerRatio` (`1.0` until you measure the divider).
 

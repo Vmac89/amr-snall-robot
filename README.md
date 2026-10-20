@@ -6,7 +6,7 @@ Electrical and mechanical numbers for this robot are unset until they are measur
 
 ## Overview
 
-Low-level control runs on an ESP32 DevKit V1: L298N PWM and direction for a differential drive, quadrature counts from the motor hall encoders, and a small serial protocol. High-level compute is a Raspberry Pi Compute Module 4 on a Waveshare CM4-Duino, with ROS 2 as the intended software stack. Depth sensing is a Microsoft Kinect for Xbox 360, model `1414`. That is a Kinect v1, so the matching library is libfreenect. The image used on this board is Raspberry Pi OS Lite (Bookworm).
+Low-level control runs on an ESP32 DevKit V4 (same pinout as V1): L298N PWM and direction for a differential drive, quadrature counts from the motor hall encoders, and a small serial protocol. High-level compute is a Raspberry Pi Compute Module 4 on a Waveshare CM4-Duino, with ROS 2 as the intended software stack. Depth sensing is a Microsoft Kinect for Xbox 360, model `1414`. That is a Kinect v1, so the matching library is libfreenect. The image used on this board is Raspberry Pi OS Lite (Bookworm).
 
 The chassis and other mechanical parts are 3D printed. CAD and mesh files are not in the tree yet.
 
@@ -16,7 +16,7 @@ A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-cont
 
 | Path | Contents |
 | --- | --- |
-| `firmware/esp32` | PlatformIO project for the ESP32 DevKit V1. |
+| `firmware/esp32` | PlatformIO project for the ESP32 DevKit V4. |
 | `ros2_ws/src/amr_base` | ROS 2 bridge: `cmd_vel` to `DRIVE`, encoder `odom` and tf, optional libfreenect. Not built in this environment. |
 | `hardware/3d-parts` | Future STL and STEP files. |
 | `hardware/electronics` | Proposed pinout. |
@@ -30,9 +30,9 @@ A static operator page, ROBZONE Mission Control 11.2, lives in `web/mission-cont
 | Qty | Part | Role | Recorded here |
 | --- | --- | --- | --- |
 | — | 3D-printed chassis and parts | Mechanical structure | No files yet. See `hardware/3d-parts`. |
-| 1 | ESP32 DevKit V1 | Motor PWM, encoder counts, serial link | WROOM-32 DevKit assumed for the pin map. |
+| 1 | ESP32 DevKit V4 | Motor PWM, encoder counts, serial link | Same 30-pin GPIO map as the DevKit V1. WROOM-32 assumed. |
 | 1 | Raspberry Pi CM4 on a Waveshare CM4-Duino | High-level compute, intended ROS 2 host | Raspberry Pi OS Lite (Bookworm). RAM and storage are unset. |
-| 2 | JGA25-370 DC gear motor with hall encoder | Left and right differential drive | Rated voltage, gear ratio, and encoder counts are unset. This name covers more than one motor variant. |
+| 2 | JGA25-371 12 V 1000 RPM DC gear motor with Hall encoder | Left and right differential drive | 11 Hall pulses per motor-shaft revolution. Gear ratio is not counted; the placeholder is 9.6. Wire colors are in the pinout. |
 | 1 | Microsoft Kinect for Xbox 360, model 1414 | Depth sensor | Kinect v1. USB data to the CM4. Power is its own 12 V adapter. |
 | 1 | L298N motor driver | Dual H-bridge for the two motors | Module current rating and input thresholds are unset. |
 | 1 | Step-down buck converter | Logic supply from the battery | Output voltage and current rating are unset. |
@@ -47,9 +47,9 @@ flowchart TD
   bat["12V battery"] --> buck["Step-down buck converter"]
   bat -->|"motor supply"| l298["L298N motor driver"]
   buck -->|"logic supply"| cm4["Raspberry Pi CM4 on Waveshare CM4-Duino"]
-  buck -->|"logic supply"| esp["ESP32 DevKit V1"]
+  buck -->|"logic supply"| esp["ESP32 DevKit V4"]
   esp -->|"PWM and direction"| l298
-  l298 --> motors["JGA25-370 DC gear motors"]
+  l298 --> motors["JGA25-371 12V gear motors"]
   enc["Hall encoders"] --> esp
   kinect["Kinect 1414, Xbox 360, USB data"] --> cm4
   esp <-->|"serial"| cm4
@@ -60,11 +60,11 @@ flowchart TD
 Confirm these on the bench. Details and the proposed GPIO map are in [hardware/electronics/pinout.md](hardware/electronics/pinout.md).
 
 - Tie battery negative, buck ground, L298N ground, ESP32 ground, and CM4 ground together.
-- Measure the buck output before it is connected to the CM4 carrier or the ESP32. The carrier's required input voltage is unset. An ESP32 DevKit V1 is powered from USB or from its 5V/VIN pin; the 3V3 pin is an output of the DevKit's regulator.
-- Confirm the JGA25-370 nameplate voltage before the 12 V pack lands on the L298N motor supply. The motor family includes more than one rated voltage.
+- Measure the buck output before it is connected to the CM4 carrier or the ESP32. The carrier's required input voltage is unset. An ESP32 DevKit V4 is powered from USB or from its 5V/VIN pin; the 3V3 pin is an output of the DevKit's regulator.
+- The JGA25-371 nameplate is 12 V, 1000 RPM. Red and white are the motor leads and go to the L298N outputs.
 - Remove the L298N `ENA` and `ENB` jumpers when those pins are driven by ESP32 PWM.
 - ESP32 GPIO high is 3.3 V. Confirm that level is a valid high for the L298N inputs on this module, or level-shift the six control lines.
-- Confirm the hall-encoder high level before it touches a GPIO. GPIO 34, 35, 36, and 39 have no internal pull-ups. A 5 V encoder swing can damage the ESP32.
+- Hall wiring: black to GND, blue to the ESP32 3V3 pin, yellow to A, green to B. Left A/B are GPIO 18 and 19. Right A/B are GPIO 21 and 22. The firmware enables internal pull-ups. GPIO 34–39 have no pull-ups, so they are not used here. A 5 V swing on A or B can damage the ESP32.
 - Fuse the motor supply. Stall current of these motors, and the continuous rating of this L298N module, are unset.
 - Cross ESP32 UART2 TX/RX to the CM4 UART, and share ground. The carrier header and the Linux device node are unset. Both ends are expected to be 3.3 V logic; confirm the header.
 - Leave ESP32 strapping pins (GPIO 0, 2, 12, 15), the USB console (GPIO 1 and 3), and the flash pins (GPIO 6–11) out of the harness.
@@ -106,7 +106,7 @@ The software path for teleop, battery sense, Kinect distance, odometry, and a RO
 
 1. Bench-check grounds, the buck voltage, the battery divider (meter it before GPIO 4), and the proposed pin map with the motors unplugged.
 2. Flash the ESP32. Confirm `ENC` ticks and that `battery_mv` matches a meter after `kBatteryDividerRatio` is set. Wheels up, check motor direction.
-3. Measure ticks per revolution, wheel diameter, and track width. Set the matching `AMR_*` values, then `AMR_GEOMETRY_CALIBRATED=1` only after a taped distance agrees with `odom`.
+3. Count ticks over 10 wheel turns (`docs/bring-up.md`). The placeholder is `11 * 9.6 * 4` (422.4) until that count replaces `GEAR_RATIO`. Then measure wheel diameter and track width. Set `AMR_GEOMETRY_CALIBRATED=1` only after a taped distance agrees with `odom`.
 4. Finish the Kinect bring-up in [docs/bring-up.md](docs/bring-up.md). Model `1414` uses its 12 V adapter. `dist` stays uncalibrated until a tape check. `otg_mode=1` under `[cm4]` is still being verified. Then set `AMR_OBSTACLE_CM`.
 5. Choose a ROS 2 distribution and `colcon build` `amr_base`. Do not run it together with `cm4/server`.
 6. Add STL and STEP files under `hardware/3d-parts`, and record dimensions from those files or from the printed parts.

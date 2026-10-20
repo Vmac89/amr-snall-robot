@@ -37,7 +37,7 @@ class MockEsp32:
     """In-process stand-in for the ESP32 firmware protocol.
 
     Tick changes while a non-zero DRIVE is latched are a test aid. They do
-    not correspond to hall-encoder counts on the JGA25-370 motors.
+    not correspond to hall-encoder counts on the JGA25-371 motors.
     """
 
     def __init__(self) -> None:

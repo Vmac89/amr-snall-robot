@@ -8,6 +8,12 @@ import time
 import unittest
 from pathlib import Path
 
+from calibration import (
+    ENCODER_PULSES_PER_MOTOR_REV,
+    GEAR_RATIO,
+    QUADRATURE_MULTIPLIER,
+    TICKS_PER_REV,
+)
 from depth_range import front_distance_cm, raw11_to_mm
 from kinect_motor import clamp_tilt
 from odometry import Odometry
@@ -328,6 +334,16 @@ class GeometryHelpersTest(unittest.TestCase):
         self.assertIsNotNone(mm)
         self.assertGreater(mm, 200)
         self.assertLess(mm, 8000)
+
+    def test_ticks_per_rev_matches_hall_formula(self) -> None:
+        self.assertEqual(ENCODER_PULSES_PER_MOTOR_REV, 11)
+        self.assertEqual(QUADRATURE_MULTIPLIER, 4)
+        self.assertEqual(GEAR_RATIO, 9.6)
+        self.assertEqual(
+            TICKS_PER_REV,
+            ENCODER_PULSES_PER_MOTOR_REV * GEAR_RATIO * QUADRATURE_MULTIPLIER,
+        )
+        self.assertAlmostEqual(TICKS_PER_REV, 422.4, places=6)
 
     def test_tilt_clamp(self) -> None:
         self.assertEqual(clamp_tilt(30), 30)

@@ -14,9 +14,16 @@ WHEEL_DIAMETER_M = 0.065
 # Distance between the two wheel contact patches, in metres. CALIBRATE.
 TRACK_WIDTH_M = 0.20
 
-# Quadrature counts for one wheel revolution after the firmware decoder.
-# CALIBRATE by rotating one wheel one turn with the other held still.
-TICKS_PER_REV = 360.0
+# JGA25-371 Hall encoder. 11 pulses per motor-shaft revolution.
+# The firmware counts every edge of both channels (see encoders.cpp).
+ENCODER_PULSES_PER_MOTOR_REV = 11
+QUADRATURE_MULTIPLIER = 4
+# TODO: calibrate. Motor-shaft turns per wheel turn. 9.6 is the ratio
+# quoted for the 1000 RPM output. It has not been counted on these motors.
+GEAR_RATIO = 9.6
+# Counts for one wheel revolution after the firmware decoder.
+# 11 * 9.6 * 4 = 422.4 until the 10-turn check in docs/bring-up.md replaces it.
+TICKS_PER_REV = ENCODER_PULSES_PER_MOTOR_REV * GEAR_RATIO * QUADRATURE_MULTIPLIER
 
 # Multiply a wheel's tick delta by this before odometry. CALIBRATE: set the
 # side to -1 if that wheel counts backward when the robot rolls forward.

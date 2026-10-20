@@ -74,7 +74,7 @@ The account needs access to that device (on Raspberry Pi OS, typically membershi
 | `AMR_OBSTACLE_CM` | `40` | CALIBRATE. Forward stop distance |
 | `AMR_WHEEL_DIAMETER_M` | `0.065` | CALIBRATE |
 | `AMR_TRACK_WIDTH_M` | `0.20` | CALIBRATE |
-| `AMR_TICKS_PER_REV` | `360` | CALIBRATE |
+| `AMR_TICKS_PER_REV` | `422.4` | CALIBRATE. `11 * 9.6 * 4` until a 10-turn count replaces the gear ratio |
 | `AMR_LEFT_TICK_SIGN` | `1` | CALIBRATE. `-1` flips that wheel |
 | `AMR_RIGHT_TICK_SIGN` | `1` | CALIBRATE |
 | `AMR_GEOMETRY_CALIBRATED` | off | Set `1` only after a taped check |

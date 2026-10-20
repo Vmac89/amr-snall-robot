@@ -1,6 +1,7 @@
 #pragma once
 
-// Proposed ESP32 DevKit V1 assignment. Keep this file in sync with
+// Proposed ESP32 DevKit V4 assignment. The 30-pin V4 uses the same GPIO
+// map as the DevKit V1. Keep this file in sync with
 // hardware/electronics/pinout.md. These are not measured connections.
 
 namespace amr {
@@ -14,10 +15,14 @@ constexpr int kRightEn = 14;
 constexpr int kRightIn3 = 32;
 constexpr int kRightIn4 = 33;
 
-constexpr int kLeftEncA = 34;
-constexpr int kLeftEncB = 35;
-constexpr int kRightEncA = 36;
-constexpr int kRightEncB = 39;
+// Hall A/B. These GPIOs are interrupt-capable and have internal pull-ups.
+// GPIO 34, 35, 36, and 39 are input-only and cannot pull up, so they are
+// not used for the open-collector Hall outputs. encoders.cpp enables
+// INPUT_PULLUP. Yellow is A, green is B. See pinout.md for wire colors.
+constexpr int kLeftEncA = 18;
+constexpr int kLeftEncB = 19;
+constexpr int kRightEncA = 21;
+constexpr int kRightEncB = 22;
 
 // UART2 defaults on the Arduino DevKit map: RX2 = 16, TX2 = 17.
 constexpr int kCm4Rx = 16;

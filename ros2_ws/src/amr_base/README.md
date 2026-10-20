@@ -17,7 +17,7 @@ Geometry and the `cmd_vel` gain are the same placeholders as `cm4/server/calibra
 | --- | --- | --- |
 | `wheel_diameter_m` | `0.065` | CALIBRATE |
 | `track_width_m` | `0.20` | CALIBRATE |
-| `ticks_per_rev` | `360` | CALIBRATE, one wheel revolution |
+| `ticks_per_rev` | `422.4` | CALIBRATE. `11 * 9.6 * 4` until a 10-turn count replaces the gear ratio |
 | `left_tick_sign`, `right_tick_sign` | `1` | CALIBRATE, set `-1` if that wheel counts backward while rolling forward |
 | `pwm_per_mps` | `400` | CALIBRATE. Not a measured top speed. Values above 255 clamp. |
 | `geometry_calibrated` | `false` | Set true only after the numbers above were measured |

@@ -152,7 +152,8 @@ class BaseDriverNode : public rclcpp::Node {
     // CALIBRATE. Same placeholders as cm4/server/calibration.py.
     wheel_diameter_m_ = declare_parameter<double>("wheel_diameter_m", 0.065);
     track_width_m_ = declare_parameter<double>("track_width_m", 0.20);
-    ticks_per_rev_ = declare_parameter<double>("ticks_per_rev", 360.0);
+    // 11 * 9.6 * 4. Same placeholder as calibration.py. TODO: calibrate.
+    ticks_per_rev_ = declare_parameter<double>("ticks_per_rev", 422.4);
     left_sign_ = declare_parameter<int>("left_tick_sign", 1);
     right_sign_ = declare_parameter<int>("right_tick_sign", 1);
     pwm_per_mps_ = declare_parameter<double>("pwm_per_mps", 400.0);
@@ -344,7 +345,7 @@ class BaseDriverNode : public rclcpp::Node {
   std::string port_;
   double wheel_diameter_m_{0.065};
   double track_width_m_{0.20};
-  double ticks_per_rev_{360.0};
+  double ticks_per_rev_{422.4};
   int left_sign_{1};
   int right_sign_{1};
   double pwm_per_mps_{400.0};

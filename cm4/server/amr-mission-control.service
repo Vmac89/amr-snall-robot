@@ -37,7 +37,7 @@ Environment=AMR_ALLOW_POWEROFF=0
 # Environment=AMR_OBSTACLE_CM=40
 # Environment=AMR_WHEEL_DIAMETER_M=0.065
 # Environment=AMR_TRACK_WIDTH_M=0.20
-# Environment=AMR_TICKS_PER_REV=360
+# Environment=AMR_TICKS_PER_REV=422.4
 # Environment=AMR_LEFT_TICK_SIGN=1
 # Environment=AMR_RIGHT_TICK_SIGN=1
 # Environment=AMR_GEOMETRY_CALIBRATED=0

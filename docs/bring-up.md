@@ -8,10 +8,10 @@ Stop `cm4/server` before starting the ROS 2 base driver, and the other way aroun
 
 - Common ground: battery negative, buck ground, L298N ground, ESP32 ground, CM4 ground.
 - Meter the buck before it touches the CM4 carrier or the ESP32. The required carrier input is unset. The DevKit is powered from USB or its 5 V pin. The 3V3 pin is an output.
-- Confirm the JGA25-370 nameplate voltage before the pack lands on the L298N motor supply.
+- The motors are JGA25-371, 12 V, 1000 RPM. Red and white are the motor leads. Land them on the L298N outputs, not on a GPIO.
 - Remove the L298N `ENA` and `ENB` jumpers. ESP32 PWM drives those pins.
 - ESP32 GPIO high is 3.3 V. Confirm that is a valid high for this L298N, or level-shift the six control lines.
-- Encoder leads: proposed inputs are GPIO 34, 35, 36, and 39. Those pins have no internal pull-ups. Meter the encoder high before it touches a GPIO. A 5 V swing can damage the ESP32.
+- Encoder leads: blue is VCC and goes to the ESP32 3V3 pin (the Hall input is 3.3–5 V; use 3.3 V). Black is encoder ground. Yellow is A and green is B. Left A/B are GPIO 18 and 19. Right A/B are GPIO 21 and 22. Those pins can interrupt and pull up. Do not use GPIO 34–39 for the Hall wires; those pins cannot pull up. The firmware enables the internal pull-ups. A 5 V swing on A or B can damage the ESP32.
 - UART: ESP32 GPIO 17 TX to the CM4 RX, GPIO 16 RX to the CM4 TX, shared ground, 3.3 V both ends. The Linux device node is unset. `/dev/ttyAMA0` is only the placeholder.
 - Leave strapping pins (GPIO 0, 2, 12, 15), UART0 (GPIO 1 and 3), and flash pins (GPIO 6–11) out of the harness.
 - Fuse the motor supply. Stall current is unset.
@@ -74,7 +74,11 @@ Open Mission Control (`http://<cm4>:8080/`). Hold the on-screen forward button, 
 
 With the wheels still unloaded, or with the chassis rolled a known distance:
 
-1. Roll one wheel one revolution with the other held. The tick delta is `ticks_per_rev` for that wheel. The placeholder is `360`. Put the measured count in `AMR_TICKS_PER_REV` and in the ROS parameter of the same name.
+1. Calibrate ticks per wheel revolution. With `TELEM 1` running, note `ENC` for the wheel you will turn. Rotate that wheel by hand through exactly 10 turns and hold the other wheel still. Read `ENC` again. Subtract. Divide that delta by 10. The result is the measured ticks per wheel revolution.
+
+   The placeholder is `11 * GEAR_RATIO * 4`. `11` is the Hall pulses per motor-shaft revolution. `4` is the quadrature multiplier, because the firmware counts every edge of yellow and green. `GEAR_RATIO` is motor-shaft turns per wheel turn. It is `9.6` (TODO: calibrate). That figure is the ratio quoted for the 1000 RPM output; it has not been counted on these motors. The product is `422.4`, which is `TICKS_PER_REV` in `cm4/server/calibration.py` and `kTicksPerWheelRev` in `firmware/esp32/include/config.h`. Ten turns at that placeholder is 4224 counts.
+
+   If the measured delta divided by 10 is different, put that measured count in `AMR_TICKS_PER_REV` and in the ROS `ticks_per_rev` parameter, and set `GEAR_RATIO` so `11 * GEAR_RATIO * 4` matches it. The same constant has to stay in the firmware header and in `calibration.py`.
 2. If a wheel's count decreases while the robot rolls forward, set that side's `AMR_LEFT_TICK_SIGN` or `AMR_RIGHT_TICK_SIGN` to `-1`.
 3. Measure the wheel diameter and the distance between the two contact patches. Placeholders are `0.065` m and `0.20` m (`AMR_WHEEL_DIAMETER_M`, `AMR_TRACK_WIDTH_M`).
 4. Roll straight a measured distance and compare with `odom.x` on `/api/data`. Adjust diameter, then ticks, until it agrees. Then set `AMR_GEOMETRY_CALIBRATED=1`. Until that flag is set, `odom.calibrated` stays false even though a pose is still computed from the placeholders.

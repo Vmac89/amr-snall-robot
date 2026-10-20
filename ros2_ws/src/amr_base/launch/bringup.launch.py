@@ -16,7 +16,8 @@ def generate_launch_description():
                 'baud': 115200,
                 'wheel_diameter_m': 0.065,
                 'track_width_m': 0.20,
-                'ticks_per_rev': 360.0,
+                # 11 Hall pulses * gear ratio 9.6 * quadrature 4. TODO: calibrate.
+                'ticks_per_rev': 422.4,
                 'left_tick_sign': 1,
                 'right_tick_sign': 1,
                 # 1 m/s would request PWM 400, then the node clamps to 255.
