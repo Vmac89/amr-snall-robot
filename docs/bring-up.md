@@ -113,6 +113,14 @@ With the source-built libfreenect importing and the camera returning a frame, `/
 
 `AMR_OBSTACLE_CM` defaults to `40` (CALIBRATE). When `dist` is a number below that threshold, forward wheel commands are forced to zero and reverse is still allowed. A missing distance does not block motion. Set `AMR_OBSTACLE_CALIBRATED=1` only after the tape check. The flag is reported; it does not by itself change the threshold.
 
+Fallback if the Mission Control camera path stays down: `cm4/server/legacy_streamer.py` is the earlier streamer that worked on this Kinect. It is a reference only. `server.py` does not import it. It opens the device once with the libfreenect async API and shares that handle for video and tilt, writes JPEGs to `/dev/shm/kinect.jpg`, and reads `/dev/shm/tilt_cmd.txt` (`up` or `down`). From `cm4/server`, with the source-built freenect module and OpenCV installed:
+
+```bash
+sudo python3 legacy_streamer.py
+```
+
+The file still prints `streamer.py` in its root check; the path in this repo is `legacy_streamer.py`. Stop `amr-mission-control.service` first so the two programs do not both open the Kinect. Writing `up` or `down` into `/dev/shm/tilt_cmd.txt` steps the tilt by 3 degrees, clamped to ±30.
+
 ## 7. First drive
 
 Wheels on the ground, a clear lane, a hand on ESTOP.
