@@ -1,0 +1,50 @@
+# Example unit for Raspberry Pi OS. Edit User, the repo path, and
+# AMR_SERIAL_PORT before installing. The CM4 UART device node is still
+# unset for this robot; /dev/ttyAMA0 is only the placeholder already used
+# elsewhere in the repo.
+#
+#   sudo cp cm4/server/amr-mission-control.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now amr-mission-control.service
+#
+# AMR_ALLOW_POWEROFF stays 0 here. The shutdown button returns an error
+# until that variable is set to 1. The process also needs permission to
+# run `shutdown` before an armed request can succeed.
+# /usr/bin/python3 needs flask, pyserial, pillow, and pyusb (the Raspberry
+# Pi OS packages python3-flask, python3-serial, python3-pil, and
+# python3-usb, or a venv whose interpreter you put in ExecStart).
+
+[Unit]
+Description=AMR Mission Control HTTP server
+After=network.target
+
+[Service]
+Type=simple
+User=amr
+SupplementaryGroups=dialout
+WorkingDirectory=/opt/amr-snall-robot/cm4/server
+ExecStart=/usr/bin/python3 /opt/amr-snall-robot/cm4/server/server.py
+Environment=PYTHONUNBUFFERED=1
+Environment=AMR_HOST=0.0.0.0
+Environment=AMR_PORT=8080
+Environment=AMR_SERIAL_PORT=/dev/ttyAMA0
+Environment=AMR_SERIAL_BAUD=115200
+Environment=AMR_MOCK_SERIAL=0
+Environment=AMR_ALLOW_POWEROFF=0
+# CALIBRATE on the bench, then uncomment. Defaults live in
+# cm4/server/calibration.py and firmware/esp32/include/config.h.
+# Environment=AMR_CLIENT_WATCHDOG_S=0.5
+# Environment=AMR_OBSTACLE_CM=40
+# Environment=AMR_WHEEL_DIAMETER_M=0.065
+# Environment=AMR_TRACK_WIDTH_M=0.20
+# Environment=AMR_TICKS_PER_REV=422.4
+# Environment=AMR_LEFT_TICK_SIGN=1
+# Environment=AMR_RIGHT_TICK_SIGN=1
+# Environment=AMR_GEOMETRY_CALIBRATED=0
+# Environment=AMR_OBSTACLE_CALIBRATED=0
+# Environment=AMR_BATT_CALIBRATED=0
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
